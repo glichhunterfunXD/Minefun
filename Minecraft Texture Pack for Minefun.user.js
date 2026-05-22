@@ -1,16 +1,3 @@
-// ==UserScript==
-// @name        Minecraft Texture Pack for Minefun
-// @description Every texture in MineFun replaced with its corresponding texture in Minecraft.
-// @author      GlitchHunter
-// @match       https://minefun.io/*
-// @version     1.7
-// @namespace https://greasyfork.org/users/1579248
-// @downloadURL https://update.greasyfork.org/scripts/569339/Minecraft%20Texture%20Pack%20for%20Minefun.user.js
-// @updateURL https://update.greasyfork.org/scripts/569339/Minecraft%20Texture%20Pack%20for%20Minefun.meta.js
-// ==/UserScript==
-
-//To find a texture, do Command+F or Control+F and search for the desired texture. (Example: "Dirt")
-
 (function () {
 
 const overrides = {
