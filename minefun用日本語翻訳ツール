@@ -1,0 +1,93 @@
+let messageDataAttribute;
+
+document.addEventListener('DOMContentLoaded', async () => {
+    const messageDataInterval = setInterval(() => {
+        try {
+            let css = [...document.styleSheets].find(x =>
+                x?.href && x?.href.includes('assets/Game-')
+            );
+
+            if (!css) return;
+
+            let match = [...css.cssRules].find(x =>
+                x?.selectorText &&
+                x?.selectorText.includes('.messages[data-v-')
+            )?.selectorText;
+
+            if (!match) return;
+
+            messageDataAttribute = match.slice(10, -1);
+            clearInterval(messageDataInterval);
+        } catch {}
+    }, 250);
+});
+
+// createElementフック
+const _createElement = document.createElement;
+
+document.createElement = function createElement() {
+    const el = _createElement.apply(this, arguments);
+
+    if (el.tagName !== 'DIV') return el;
+
+    const _setAttribute = el.setAttribute;
+
+    el.setAttribute = function setAttribute() {
+        if (
+            messageDataAttribute &&
+            arguments[0] === messageDataAttribute
+        ) {
+            handleMessage(this);
+        }
+
+        return _setAttribute.apply(this, arguments);
+    };
+
+    return el;
+};
+
+function handleMessage(el) {
+    if (!el || el?.children?.length !== 2) return;
+
+    const userEl = el.children[0];
+    const textEl = el.children[1];
+
+    if (!textEl.innerText) return;
+
+    console.log(`翻訳中: "${textEl.innerText}"`);
+
+    translateMessage(textEl.innerText)
+        .then(translated => {
+            if (!textEl?.innerText) return;
+
+            // [言語]: 翻訳文
+            textEl.innerText = `[${translated[0]}] ${translated[1]}`;
+        })
+        .catch(err => {
+            console.warn('翻訳エラー...', err);
+        });
+}
+
+const messageCache = {};
+
+// Google翻訳API
+async function translateMessage(text) {
+    if (messageCache[text]) return messageCache[text];
+
+    // tl=ja に変更 → 日本語翻訳
+    const res = await fetch(
+        "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=ja&dt=t&q=" +
+        encodeURIComponent(text)
+    );
+
+    const data = await res.json();
+
+    const result = [
+        data[2], // 元言語
+        data[0].map(x => x[0]).join('')
+    ];
+
+    messageCache[text] = result;
+
+    return result;
+}
