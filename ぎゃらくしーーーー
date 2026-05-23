@@ -1420,8 +1420,25 @@ function applyCrosshairTo(aim){
 
 setInterval(() => {
     if(!data.mods.crosshair) return;
-    let aim = document.querySelector(".aim") || document.querySelector(".sights");
-    if(aim) applyCrosshairTo(aim);
+
+    let aim = document.getElementById("mf-crosshair-fixed");
+
+    if(!aim){
+        aim = document.createElement("div");
+        aim.id = "mf-crosshair-fixed";
+
+        aim.style.position = "fixed";
+        aim.style.left = "50%";
+        aim.style.top = "50%";
+        aim.style.transform = "translate(-50%,-50%)";
+        aim.style.pointerEvents = "none";
+        aim.style.zIndex = "999999";
+
+        document.body.appendChild(aim);
+    }
+
+    applyCrosshairTo(aim);
+
 }, 100);
 
 function buildCrosshairSettings(){
