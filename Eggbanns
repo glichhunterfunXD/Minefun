@@ -1,0 +1,728 @@
+(()=>{
+
+// ─── Event Emitter ───────────────────────────────────────────────────────────
+var c={listeners:{},activeKeys:new Set,on:function(r,e){this.listeners[r]||(this.listeners[r]=[]),this.listeners[r].push(e)},remove:function(r,e){this.listeners[r]&&(this.listeners[r]=this.listeners[r].filter(t=>t!==e))},emit:function(r,e){this.listeners[r]&&this.listeners[r].forEach(t=>t(e))},trackKey:function(r,e,t){r==="keydown"&&moduleManager.handleKeyPress(t),r==="keydown"&&!this.activeKeys.has(e)&&(this.activeKeys.add(e),this.emit("keyPress",{key:e,code:t})),r==="keyup"&&this.activeKeys.has(e)&&(this.activeKeys.delete(e),this.emit("keyRelease",{key:e,code:t}))}};
+
+// ─── Base Module Class ────────────────────────────────────────────────────────
+var a=class{
+    constructor(e,t,i,s){
+        this.name=e;
+        this.category=t;
+        this.options=i||{};
+        this.keybind=s||null;
+        this.waitingForBind=false;
+        this.isEnabled=false;
+        this.toggle=this.toggle.bind(this);
+    }
+    onEnable(){}
+    onDisable(){}
+    onRender(){}
+    onSettingUpdate(){}
+    enable(){this.isEnabled=true;c.emit("module.update",this);this.onEnable()}
+    disable(){this.isEnabled=false;c.emit("module.update",this);this.onDisable()}
+    toggle(){this.isEnabled?this.disable():this.enable()}
+
+    // キーバインドをlocalStorageへ保存
+    saveKeybind(){
+        try{
+            let saved=JSON.parse(localStorage.getItem("mb_keybinds")||"{}");
+            saved[this.name]=this.keybind;
+            localStorage.setItem("mb_keybinds",JSON.stringify(saved));
+        }catch(e){}
+    }
+
+    // キーバインドをlocalStorageから読み込み
+    loadKeybind(){
+        try{
+            let saved=JSON.parse(localStorage.getItem("mb_keybinds")||"{}");
+            if(saved[this.name]!==undefined) this.keybind=saved[this.name];
+        }catch(e){}
+    }
+};
+
+// ─── CSS ─────────────────────────────────────────────────────────────────────
+var ae=`
+@font-face {
+    font-family: "Product Sans";
+    src: url(https://fonts.gstatic.com/s/productsans/v19/pxiDypQkot1TnFhsFMOfGShVF9eO.woff2);
+}
+
+:root {
+    --Minebuns-accent-color: linear-gradient(90deg, rgb(64, 190, 255) 0%, rgb(129, 225, 255) 100%);
+    --button-color: rgb(40, 40, 40, 0.9);
+    --hover-color: rgb(50, 50, 50, 0.9);
+    --panel-bg: rgb(10, 10, 10, 0.85);
+    --text-color: #ffffff;
+    --header-text-size: 25px;
+    --button-text-size: 20px;
+    --setting-text-size: 15px;
+}
+
+.gui-panel {
+    position: fixed;
+    z-index: 1000;
+    width: 220px;
+    border-radius: 8px;
+    background-color: var(--panel-bg);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+    font-family: 'Product Sans', sans-serif;
+    color: var(--text-color);
+    overflow: hidden;
+}
+
+.gui-header {
+    background-color: var(--header-bg);
+    height: 40px;
+    font-weight: 900;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--header-text-size);
+    cursor: grab;
+}
+
+.gui-header:active { cursor: grabbing; }
+
+.gui-button {
+    height: 35px;
+    display: flex;
+    align-items: center;
+    padding-left: 10px;
+    box-sizing: border-box;
+    cursor: pointer;
+    border-radius: 0;
+    transition: all 0.3s;
+    font-size: var(--button-text-size);
+    font-weight: 200;
+    outline: none;
+    background: var(--button-color);
+    color: var(--text-color);
+    position: relative;
+}
+
+.gui-button.enabled { background: var(--Minebuns-accent-color); }
+.gui-button:not(.enabled):hover { background: var(--hover-color); }
+
+/* ─── キーバインドバッジ ─── */
+.gui-keybind-badge {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 5px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.12);
+    color: rgba(255,255,255,0.6);
+    cursor: pointer;
+    white-space: nowrap;
+    max-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: background 0.2s, color 0.2s;
+    user-select: none;
+}
+
+.gui-keybind-badge:hover {
+    background: rgba(255,255,255,0.22);
+    color: #fff;
+}
+
+.gui-keybind-badge.waiting {
+    background: linear-gradient(90deg, rgb(64,190,255) 0%, rgb(129,225,255) 100%);
+    color: #000;
+    animation: keybind-pulse 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes keybind-pulse {
+    from { opacity: 0.7; }
+    to   { opacity: 1;   }
+}
+
+/* ─── キーバインド設定パネル (Keybinds カテゴリ) ─── */
+.gui-keybind-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background-color: var(--panel-bg);
+    padding: 4px 10px;
+    min-height: 30px;
+}
+
+.gui-keybind-name {
+    font-size: 13px;
+    font-weight: 300;
+    color: var(--text-color);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gui-keybind-btn {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.12);
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+    min-width: 52px;
+    text-align: center;
+    transition: background 0.2s, color 0.2s;
+    user-select: none;
+}
+
+.gui-keybind-btn:hover {
+    background: rgba(255,255,255,0.22);
+    color: #fff;
+}
+
+.gui-keybind-btn.waiting {
+    background: linear-gradient(90deg, rgb(64,190,255) 0%, rgb(129,225,255) 100%);
+    color: #000;
+    animation: keybind-pulse 0.8s ease-in-out infinite alternate;
+}
+
+.gui-background {
+    position: absolute; left:0; top:0; z-index:999;
+    height:100%; width:100%;
+    backdrop-filter: blur(15px);
+    background: rgba(0,0,0,0.3);
+}
+
+.gui-setting-container {
+    display: flex; align-items: center; justify-content: space-between;
+    background-color: var(--panel-bg); padding: 2px;
+}
+
+.gui-setting-label {
+    font-size: var(--setting-text-size); margin-left:10px;
+    font-weight:300; color: var(--text-color);
+}
+
+.gui-checkbox {
+    width:15px; height:15px; border-radius:4px;
+    background: var(--button-color); position:relative;
+    margin:8px; cursor:pointer; transition: background 0.3s;
+}
+.gui-checkbox.enabled { background: var(--Minebuns-accent-color); }
+
+.gui-color-picker { width:15px; height:15px; border-radius:4px; position:relative; margin:8px; cursor:pointer; }
+.gui-color-input  { width:20px; height:20px; opacity:0; cursor:pointer; }
+
+.gui-button-container { background-color: var(--panel-bg); display:flex; flex-direction:column; }
+
+.gui-text-input {
+    background: var(--button-color); border:none; color: var(--text-color);
+    font-family:'Product Sans',sans-serif; font-size: var(--setting-text-size);
+    width:40px; border-radius:4px; outline:none; transition: background 0.3s;
+    text-align:center; margin:5px; margin-right:10px;
+}
+.gui-text-input:hover  { background: var(--hover-color); }
+.gui-text-input:focus  { background: var(--hover-color); }
+
+.with-animations .gui-panel { animation: fadeInScale 0.3s ease-out; }
+@keyframes fadeInScale {
+    from { opacity:0; transform:scale(0.9); }
+    to   { opacity:1; transform:scale(1);   }
+}
+.with-animations .gui-background { animation: fadeIn 0.3s ease-out; }
+@keyframes fadeIn { from{opacity:0} to{opacity:1} }
+.with-animations .gui-button { transition: transform 0.2s ease, background 0.2s ease; }
+.with-animations .gui-button:hover { transform: scale(1.01); }
+.with-animations .gui-setting-container {
+    will-change: transform, opacity; transform-origin: top;
+    animation: slideDown 0.25s ease-out forwards;
+}
+@keyframes slideDown {
+    from { opacity:0; transform:scaleY(0.8); }
+    to   { opacity:1; transform:scaleY(1);   }
+}
+`;
+
+// ─── CSS注入 ──────────────────────────────────────────────────────────────────
+function ce(r){let e=document.createElement("style");e.textContent=r;document.head.appendChild(e)}
+ce(ae);
+
+// ─── Math Utils ───────────────────────────────────────────────────────────────
+var x={
+    normalizeVector(r){let e=r.x*r.x+r.y*r.y+r.z*r.z;if(e>0){let t=1/Math.sqrt(e);return[r.x*t,r.y*t,r.z*t]}return r},
+    distanceBetween(r,e){let t=e.x-r.x,i=e.y-r.y,s=e.z-r.z;return t*t+i*i+s*s},
+    distanceBetweenSqrt(r,e){return Math.sqrt(this.distanceBetween(r,e))},
+    calculateDistance(r,e){return Math.hypot(e.x-r.x,e.y-r.y,e.z-r.z)},
+    calculateDistanceArr(r,e){return Math.hypot(e[0]-r[0],e[1]-r[1],e[2]-r[2])}
+};
+
+// ─── Helper Utils ─────────────────────────────────────────────────────────────
+var m={
+    getClosestPlayer(){
+        let r=o.gameWorld.player.position,e=o.gameWorld.server.players,t=[];
+        e.forEach(function(i,s){let n=x.distanceBetween(r,{x:i._model.position.x,y:i._model.position.y,z:i._model.position.z});i.id=s;t.push({player:i,distance:n})});
+        t.sort((i,s)=>i.distance-s.distance);
+        return t.map(i=>i.player)[0]
+    },
+    hexToRgb(r){var e=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(r);return e?{r:parseInt(e[1],16),g:parseInt(e[2],16),b:parseInt(e[3],16)}:null},
+    rgbToUnit(r){return{r:r.r/255,g:r.g/255,b:r.b/255}},
+    getCssRule(r){for(let e of document.styleSheets)for(let t of e.cssRules||[])if(t.selectorText?.includes(r))return t},
+    openOtherItem(r){let e=Object.values(o.gameWorld.player.position).map(Math.floor),t=o.gameWorld.systemsManager.activeSystems.find(i=>i?.openOtherItem);o.stores.get("inventoryState").setBackpackStates(0);setTimeout(()=>{t.openOtherItem(e,r)},100)}
+};
+
+// ─── キーコードを人が読みやすい表示に変換 ─────────────────────────────────────
+function formatKeyCode(code){
+    if(!code) return "None";
+    return code
+        .replace(/^Key/,"")
+        .replace(/^Digit/,"")
+        .replace("ShiftLeft","L-Shift")
+        .replace("ShiftRight","R-Shift")
+        .replace("ControlLeft","L-Ctrl")
+        .replace("ControlRight","R-Ctrl")
+        .replace("AltLeft","L-Alt")
+        .replace("AltRight","R-Alt")
+        .replace("Space","Space")
+        .replace("Backquote","`")
+        .replace("Semicolon",";")
+        .replace("Quote","'")
+        .replace("Comma",",")
+        .replace("Period",".")
+        .replace("Slash","/")
+        .replace("Backslash","\\")
+        .replace("BracketLeft","[")
+        .replace("BracketRight","]")
+        .replace("Minus","-")
+        .replace("Equal","=")
+        .replace("Backspace","BkSp")
+        .replace("Enter","Enter")
+        .replace("Escape","Esc")
+        .replace("Tab","Tab")
+        .replace("CapsLock","Caps")
+        .replace("ArrowUp","↑")
+        .replace("ArrowDown","↓")
+        .replace("ArrowLeft","←")
+        .replace("ArrowRight","→");
+}
+
+// ─── Arraylist ────────────────────────────────────────────────────────────────
+var v=class extends a{
+    constructor(){super("Arraylist","Visual");this.namesMap={};this.arraylistContainer=null;this.initialized=false}
+    update(e,t){
+        if(t){
+            if(!this.namesMap[e]){
+                let s=document.createElement("div");
+                s.style.cssText="background:rgba(10,10,10,0.7);color:white;padding:2px 10px;display:flex;align-items:center;box-sizing:border-box;margin:0;font-family:'Product Sans',sans-serif;box-shadow:rgb(0,0,0,0.05) -5px 1px;transition:max-height 0.2s ease-in-out,opacity 0.2s ease-in-out;overflow:hidden;max-height:0;opacity:0;";
+                let n=document.createElement("span");
+                n.style.cssText="font-weight:800;font-size:16px;background-image:var(--Minebuns-accent-color);color:transparent;background-clip:text;";
+                n.innerHTML=e;s.appendChild(n);this.arraylistContainer.appendChild(s);
+                setTimeout(()=>{s.style.maxHeight="50px";s.style.opacity="1"},1);
+                this.namesMap[e]=s;
+            }
+        } else {
+            if(this.namesMap[e]){
+                let s=this.namesMap[e];
+                s.style.maxHeight="0";s.style.opacity="0";
+                setTimeout(()=>{s.remove();delete this.namesMap[e]},300);
+            }
+        }
+    }
+    onEnable(){
+        if(!this.initialized){
+            let e=document.createElement("div");
+            e.style.cssText="position:fixed;top:0;right:0;z-index:999;display:flex;flex-direction:column;align-items:flex-end;pointer-events:none;";
+            document.body.appendChild(e);this.arraylistContainer=e;this.initialized=true;
+        }
+        c.on("module.update",this._onModuleUpdate=({name,isEnabled})=>{this.update(name,isEnabled)});
+    }
+    onDisable(){
+        c.remove("module.update",this._onModuleUpdate);
+        if(this.arraylistContainer){this.arraylistContainer.innerHTML="";this.namesMap={}}
+    }
+};
+
+// ─── ClickGUI ─────────────────────────────────────────────────────────────────
+var M=class extends a{
+    constructor(){
+        super("ClickGUI","Visual",{
+            "Accent Color 1":"rgb(64, 190, 255)",
+            "Accent Color 2":"rgb(129, 225, 255)",
+            "Button Color":"rgb(40, 40, 40, 0.9)",
+            "Hover Color":"rgb(50, 50, 50, 0.9)",
+            "Header Color":"rgb(0, 0, 0, 0.85)",
+            "Panel Color":"rgb(18, 18, 18)",
+            "Text Color":"#ffffff",
+            "Enable Animations":true
+        },"ShiftRight");
+        this.GUILoaded=false;this.panels=[];this.blurredBackground=null;
+        this.updateColors();
+    }
+
+    updateAnimations(){
+        this.options["Enable Animations"]
+            ?document.body.classList.add("with-animations")
+            :document.body.classList.remove("with-animations");
+    }
+
+    updateColors(){
+        document.body.style.setProperty("--Minebuns-accent-color",
+            `linear-gradient(90deg, ${this.options["Accent Color 1"]} 0%, ${this.options["Accent Color 2"]} 100%)`);
+        document.body.style.setProperty("--button-color",this.options["Button Color"]);
+        document.body.style.setProperty("--hover-color",this.options["Hover Color"]);
+        document.body.style.setProperty("--header-bg",this.options["Header Color"]);
+        document.body.style.setProperty("--panel-bg",this.options["Panel Color"]);
+        document.body.style.setProperty("--text-color",this.options["Text Color"]);
+        this.updateAnimations();
+    }
+
+    onSettingUpdate(){this.updateColors()}
+
+    onEnable(){
+        if(this.GUILoaded){
+            document.querySelectorAll(".gui-panel").forEach(e=>e.style.display="block");
+            if(this.blurredBackground) this.blurredBackground.style.display="block";
+            return;
+        }
+        this.GUILoaded=true;
+        this.blurredBackground=document.createElement("div");
+        this.blurredBackground.classList.add("gui-background");
+        document.body.appendChild(this.blurredBackground);
+        this.blurredBackground.addEventListener("click",()=>this.toggle());
+
+        // カテゴリ別にパネルを作成（Keybindsカテゴリを追加）
+        let categories={};
+        moduleManager.modules.forEach(mod=>{
+            let cat=mod.category||"Misc";
+            if(!categories[cat]) categories[cat]=[];
+            categories[cat].push(mod);
+        });
+        // Keybindsパネルを追加
+        categories["Keybinds"]=moduleManager.modules.filter(m=>m.name!=="ClickGUI");
+
+        let keys=Object.keys(categories);
+        keys.forEach((cat,idx)=>{
+            let panel=document.createElement("div");
+            panel.classList.add("gui-panel");
+            panel.style.top="60px";
+            panel.style.left=(20+idx*230)+"px";
+
+            let header=document.createElement("div");
+            header.classList.add("gui-header");
+            header.textContent=cat;
+            panel.appendChild(header);
+
+            // ドラッグ
+            let dragging=false,ox=0,oy=0;
+            header.addEventListener("mousedown",e=>{dragging=true;ox=e.clientX-panel.offsetLeft;oy=e.clientY-panel.offsetTop});
+            document.addEventListener("mousemove",e=>{if(dragging){panel.style.left=(e.clientX-ox)+"px";panel.style.top=(e.clientY-oy)+"px"}});
+            document.addEventListener("mouseup",()=>{dragging=false});
+
+            if(cat==="Keybinds"){
+                // Keybindsパネル: モジュールごとにキー割り当てボタン
+                categories[cat].forEach(mod=>{
+                    let row=document.createElement("div");
+                    row.classList.add("gui-keybind-row");
+
+                    let label=document.createElement("span");
+                    label.classList.add("gui-keybind-name");
+                    label.textContent=mod.name;
+
+                    let btn=document.createElement("div");
+                    btn.classList.add("gui-keybind-btn");
+                    btn.textContent=formatKeyCode(mod.keybind);
+
+                    btn.addEventListener("click",e=>{
+                        e.stopPropagation();
+                        // 他の待機中をキャンセル
+                        moduleManager.modules.forEach(m=>{
+                            if(m.waitingForBind&&m!==mod){
+                                m.waitingForBind=false;
+                                // 対応するバッジを更新
+                                document.querySelectorAll(`[data-keybind-module="${m.name}"]`).forEach(el=>{
+                                    el.classList.remove("waiting");
+                                    el.textContent=formatKeyCode(m.keybind);
+                                });
+                            }
+                        });
+                        mod.waitingForBind=!mod.waitingForBind;
+                        btn.classList.toggle("waiting",mod.waitingForBind);
+                        btn.textContent=mod.waitingForBind?"Press key…":formatKeyCode(mod.keybind);
+                    });
+                    btn.setAttribute("data-keybind-module",mod.name);
+
+                    row.appendChild(label);
+                    row.appendChild(btn);
+                    panel.appendChild(row);
+                });
+            } else {
+                // 通常カテゴリ: モジュールボタン + キーバインドバッジ
+                let btnContainer=document.createElement("div");
+                btnContainer.classList.add("gui-button-container");
+
+                categories[cat].forEach(mod=>{
+                    let btn=document.createElement("button");
+                    btn.classList.add("gui-button");
+                    if(mod.isEnabled) btn.classList.add("enabled");
+
+                    let nameSpan=document.createElement("span");
+                    nameSpan.style.flex="1";
+                    nameSpan.textContent=mod.name;
+                    btn.appendChild(nameSpan);
+
+                    // キーバインドバッジ
+                    let badge=document.createElement("span");
+                    badge.classList.add("gui-keybind-badge");
+                    badge.setAttribute("data-keybind-module",mod.name);
+                    badge.textContent=formatKeyCode(mod.keybind);
+                    badge.title="クリックでキー割り当て変更";
+                    btn.appendChild(badge);
+
+                    // 左クリック: モジュールON/OFF
+                    btn.addEventListener("click",e=>{
+                        if(e.target===badge) return;
+                        mod.toggle();
+                        btn.classList.toggle("enabled",mod.isEnabled);
+                    });
+
+                    // バッジクリック: キー割り当て
+                    badge.addEventListener("click",e=>{
+                        e.stopPropagation();
+                        moduleManager.modules.forEach(m=>{
+                            if(m.waitingForBind&&m!==mod){
+                                m.waitingForBind=false;
+                                document.querySelectorAll(`[data-keybind-module="${m.name}"]`).forEach(el=>{
+                                    el.classList.remove("waiting");
+                                    el.textContent=formatKeyCode(m.keybind);
+                                });
+                            }
+                        });
+                        mod.waitingForBind=!mod.waitingForBind;
+                        document.querySelectorAll(`[data-keybind-module="${mod.name}"]`).forEach(el=>{
+                            el.classList.toggle("waiting",mod.waitingForBind);
+                            el.textContent=mod.waitingForBind?"Press key…":formatKeyCode(mod.keybind);
+                        });
+                    });
+
+                    btnContainer.appendChild(btn);
+
+                    // 設定オプション（options）を展開表示
+                    if(mod.options&&Object.keys(mod.options).length>0){
+                        let settingsContainer=document.createElement("div");
+                        settingsContainer.style.display="none";
+                        Object.entries(mod.options).forEach(([key,val])=>{
+                            let row=document.createElement("div");
+                            row.classList.add("gui-setting-container");
+                            let lbl=document.createElement("span");
+                            lbl.classList.add("gui-setting-label");
+                            lbl.textContent=key;
+                            row.appendChild(lbl);
+                            if(typeof val==="boolean"){
+                                let cb=document.createElement("div");
+                                cb.classList.add("gui-checkbox");
+                                if(val) cb.classList.add("enabled");
+                                cb.addEventListener("click",()=>{
+                                    mod.options[key]=!mod.options[key];
+                                    cb.classList.toggle("enabled",mod.options[key]);
+                                    mod.onSettingUpdate();
+                                });
+                                row.appendChild(cb);
+                            } else if(typeof val==="number"){
+                                let inp=document.createElement("input");
+                                inp.classList.add("gui-text-input");
+                                inp.type="number";inp.value=val;
+                                inp.addEventListener("change",()=>{mod.options[key]=parseFloat(inp.value)||val;mod.onSettingUpdate()});
+                                row.appendChild(inp);
+                            } else if(typeof val==="string"&&val.startsWith("rgb")){
+                                let cpWrap=document.createElement("div");cpWrap.classList.add("gui-color-picker");
+                                let cp=document.createElement("input");cp.classList.add("gui-color-input");cp.type="color";
+                                cp.addEventListener("input",()=>{mod.options[key]=cp.value;mod.onSettingUpdate()});
+                                cpWrap.appendChild(cp);row.appendChild(cpWrap);
+                            } else {
+                                let inp=document.createElement("input");
+                                inp.classList.add("gui-text-input");inp.value=val;
+                                inp.addEventListener("change",()=>{mod.options[key]=inp.value;mod.onSettingUpdate()});
+                                row.appendChild(inp);
+                            }
+                            settingsContainer.appendChild(row);
+                        });
+                        btn.addEventListener("contextmenu",e=>{
+                            e.preventDefault();
+                            settingsContainer.style.display=settingsContainer.style.display==="none"?"block":"none";
+                        });
+                        btnContainer.appendChild(settingsContainer);
+                    }
+                });
+                panel.appendChild(btnContainer);
+            }
+
+            document.body.appendChild(panel);
+            this.panels.push(panel);
+        });
+
+        // module.update でボタンの enabled クラスを同期
+        c.on("module.update",this._onUpdate=mod=>{
+            document.querySelectorAll(".gui-button").forEach(btn=>{
+                let span=btn.querySelector("span");
+                if(span&&span.textContent===mod.name){
+                    btn.classList.toggle("enabled",mod.isEnabled);
+                }
+            });
+        });
+    }
+
+    onDisable(){
+        document.querySelectorAll(".gui-panel").forEach(e=>e.style.display="none");
+        if(this.blurredBackground) this.blurredBackground.style.display="none";
+    }
+};
+
+// ─── Spider ───────────────────────────────────────────────────────────────────
+var q=class extends a{
+    constructor(){super("Spider","Movement",{Speed:5})}
+    get playerPhysicsSystem(){return o.gameWorld.systemsManager.activeSystems.find(e=>e?.playerPhysicsSystem).playerPhysicsSystem}
+    get upAgainstWall(){return this.playerPhysicsSystem.playerVelVec3.x==0||this.playerPhysicsSystem.playerVelVec3.z==0}
+    onRender(){o?.gameWorld?.player&&o?.gameWorld?.player?.inputs.jump&&this.upAgainstWall&&(o.gameWorld.player.velocity.velVec3.y=this.options.Speed)}
+};
+
+// ─── Freecam ──────────────────────────────────────────────────────────────────
+var X=class extends a{
+    constructor(){super("Freecam","Visual",{"3rd person":"true"});this._copy=null;this.realPos=null}
+    get playerModel(){return o.gameWorld.systemsManager.activeSystems.find(e=>e?.model).model}
+    onEnable(){
+        let e=o.gameWorld,t=0;
+        e.player.cameraMode==1&&this.options["3rd person"]=="true"&&(o.gameWorld.switchCameraView(),t=100);
+        o.gameWorld.server.msgsListeners[p.toClient.SET_INVISIBLE_MODE]();
+        setTimeout(()=>{this._copy=this._copy||this.playerModel.position.copy;this.playerModel.position.copy=()=>{};this.realPos=this.playerModel.position},t);
+    }
+    onDisable(){
+        o.gameWorld.server.msgsListeners[p.toClient.SET_WALK_MODE]();
+        this.playerModel.position.copy=this._copy.bind(this.playerModel.position);
+        this.playerModel.position=this.realPos;
+    }
+};
+
+// ─── AirPlace ─────────────────────────────────────────────────────────────────
+var Z=class extends a{
+    constructor(){super("AirPlace","Misc")}
+    get blockPlaceSystem(){return o.gameWorld.systemsManager.activeSystems.find(e=>e?._handlePlaceInAir)}
+    onEnable(){this.blockPlaceSystem.canPlaceBlocksInAir=true}
+    onDisable(){this.blockPlaceSystem.canPlaceBlocksInAir=o.gameWorld.player.gameMode==2}
+};
+
+// ─── BlockFinder ──────────────────────────────────────────────────────────────
+var BlockFinder=class extends a{
+    constructor(){
+        super("BlockFinder","Misc",{"Block ID":1,"Search Radius":3});
+        this.CHUNK_CHECK_MS=500;this.foundBlocks=[];this.lastChunkKey="";
+        this.ui=null;this.listEl=null;this.raf=null;this.chunkInterval=null;
+    }
+    getPlayerChunk(){
+        let p2=o.gameWorld.player.position;
+        return[Math.floor(p2.x/16),Math.floor(p2.y/16),Math.floor(p2.z/16)];
+    }
+    createUI(){
+        let e=document.createElement("div");
+        e.style.cssText=`position:fixed;top:80px;left:80px;width:260px;background:#111;color:#ddd;font:11px system-ui,sans-serif;border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,.4);z-index:99999;user-select:none;`;
+        e.innerHTML=`<div class="bf-head" style="padding:6px 8px;cursor:move;opacity:.85;">Block Finder</div><div class="bf-list" style="max-height:260px;overflow:auto;padding:4px 8px 8px;font-family:monospace;white-space:pre;"></div>`;
+        document.body.appendChild(e);this.ui=e;this.listEl=e.querySelector(".bf-list");
+        let t=false,i=0,s=0,n=e.querySelector(".bf-head");
+        n.onmousedown=l=>{t=true;i=l.clientX-e.offsetLeft;s=l.clientY-e.offsetTop};
+        document.addEventListener("mousemove",this._dragMove=l=>{t&&(e.style.left=l.clientX-i+"px",e.style.top=l.clientY-s+"px")});
+        document.addEventListener("mouseup",this._dragUp=()=>{t=false});
+    }
+    destroyUI(){if(this.ui){this.ui.remove();this.ui=null;this.listEl=null;document.removeEventListener("mousemove",this._dragMove);document.removeEventListener("mouseup",this._dragUp)}}
+    scanChunks(){
+        let e=this.options["Search Radius"]|0,t=this.options["Block ID"]|0,i=o.gameWorld.chunkManager,s=this.getPlayerChunk();
+        this.foundBlocks.length=0;
+        for(let n=-e;n<=e;n++)for(let l=-e;l<=e;l++)for(let d=-e;d<=e;d++){
+            let u=s[0]+n,y=s[1]+l,f=s[2]+d,g=i.getChunkArray(u,y,f);
+            if(g)for(let b=0;b<g.length;b++){
+                if(g[b]!==t)continue;
+                let ie=(u<<4)+(b&15),re=(y<<4)+(b>>4&15),ne=(f<<4)+(b>>8);
+                o.gameWorld.chunkManager.getBlock(ie,re,ne)===t&&this.foundBlocks.push([ie,re,ne]);
+            }
+        }
+    }
+    renderDistances=()=>{
+        if(!this.listEl)return;
+        let e=[...Object.values(o.gameWorld.player.position)];
+        this.foundBlocks.length===0
+            ?this.listEl.textContent="none nearby"
+            :this.listEl.textContent=this.foundBlocks
+                .map(t=>({pos:t,d:x.calculateDistanceArr(e,t)}))
+                .sort((t,i)=>t.d-i.d)
+                .map(t=>`${t.pos[0]}, ${t.pos[1]}, ${t.pos[2]}  ${t.d.toFixed(1)}m`)
+                .join("\n");
+        this.raf=requestAnimationFrame(this.renderDistances);
+    }
+    onEnable(){
+        this.createUI();this.scanChunks();this.renderDistances();
+        this.chunkInterval=setInterval(()=>{
+            let e=this.getPlayerChunk().join(",");
+            e!==this.lastChunkKey&&(this.lastChunkKey=e,this.scanChunks());
+        },this.CHUNK_CHECK_MS);
+    }
+    onDisable(){
+        clearInterval(this.chunkInterval);cancelAnimationFrame(this.raf);
+        this.chunkInterval=null;this.raf=null;this.foundBlocks.length=0;this.lastChunkKey="";
+        this.destroyUI();
+    }
+};
+
+// ─── Module Manager ───────────────────────────────────────────────────────────
+var moduleManager={
+    modules:[
+        new M(),        // ClickGUI   (Visual)
+        new v(),        // Arraylist  (Visual)
+        new X(),        // Freecam    (Visual)
+        new q(),        // Spider     (Movement)
+        new Z(),        // AirPlace   (Misc)
+        new BlockFinder() // BlockFinder (Misc)
+    ],
+
+    init(){
+        // localStorageからキーバインドを復元
+        this.modules.forEach(m=>m.loadKeybind());
+
+        // キーイベントを登録
+        document.addEventListener("keydown",e=>{c.trackKey("keydown",e.key,e.code)});
+        document.addEventListener("keyup",e=>{c.trackKey("keyup",e.key,e.code)});
+
+        // ClickGUIは最初から有効
+        let gui=this.modules.find(m=>m.name==="ClickGUI");
+        if(gui) gui.enable();
+    },
+
+    handleKeyPress(code){
+        // 1. キーバインド入力待ち中のモジュールを探す
+        for(let mod of this.modules){
+            if(mod.waitingForBind){
+                // Escapeで解除（キーなし）
+                if(code==="Escape"){
+                    mod.keybind=null;
+                } else {
+                    mod.keybind=code;
+                }
+                mod.waitingForBind=false;
+                mod.saveKeybind();
+                // UI上のバッジ/ボタンを全て更新
+                document.querySelectorAll(`[data-keybind-module="${mod.name}"]`).forEach(el=>{
+                    el.classList.remove("waiting");
+                    el.textContent=formatKeyCode(mod.keybind);
+                });
+                return; // キーバインド設定中は他の処理をスキップ
+            }
+        }
+
+        // 2. 通常時: キーバインドに一致するモジュールをトグル
+        for(let mod of this.modules){
+            if(mod.keybind===code){
+                mod.toggle();
+            }
+        }
+    }
+};
+
+// ─── 起動 ─────────────────────────────────────────────────────────────────────
+moduleManager.init();
+
+})();
