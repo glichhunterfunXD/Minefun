@@ -1,0 +1,453 @@
+(function() {
+    'use strict';
+    
+    let targetLanguage = 'en';
+    let isEnabled = true;
+    let settingsPanel = null;
+    
+    const styleTag = document.createElement('style');
+    styleTag.textContent = `
+        .minefun-translator-badge {
+            display: inline-block !important;
+            margin-left: 6px !important;
+            padding: 2px 5px !important;
+            background: rgba(59, 130, 246, 0.15) !important;
+            border: 1px solid rgba(59, 130, 246, 0.3) !important;
+            border-radius: 4px !important;
+            font-size: 0.65em !important;
+            color: rgba(59, 130, 246, 1) !important;
+            font-weight: 700 !important;
+            vertical-align: middle !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.5px !important;
+            cursor: pointer !important;
+            transition: all 0.2s ease !important;
+        }
+        
+        .minefun-translator-badge:hover {
+            background: rgba(59, 130, 246, 0.25) !important;
+            transform: scale(1.05) !important;
+        }
+        
+        .minefun-translator-badge.showing-original {
+            background: rgba(251, 191, 36, 0.15) !important;
+            border-color: rgba(251, 191, 36, 0.3) !important;
+            color: rgba(251, 191, 36, 1) !important;
+        }
+    `;
+    document.head.appendChild(styleTag);
+    
+    const languages = {
+        'en': 'English',
+        'es': 'Spanish',
+        'fr': 'French',
+        'de': 'German',
+        'it': 'Italian',
+        'pt': 'Portuguese',
+        'ru': 'Russian',
+        'ja': 'Japanese',
+        'ko': 'Korean',
+        'zh': 'Chinese',
+        'ar': 'Arabic',
+        'hi': 'Hindi',
+        'tr': 'Turkish',
+        'pl': 'Polish',
+        'nl': 'Dutch',
+        'sv': 'Swedish',
+        'no': 'Norwegian',
+        'da': 'Danish',
+        'fi': 'Finnish',
+        'cs': 'Czech',
+        'ro': 'Romanian',
+        'hu': 'Hungarian',
+        'th': 'Thai',
+        'vi': 'Vietnamese',
+        'id': 'Indonesian'
+    };
+    
+    function loadSettings() {
+        const saved = localStorage.getItem('minefun_translator_lang');
+        if (saved && languages[saved]) {
+            targetLanguage = saved;
+        }
+        
+        const enabled = localStorage.getItem('minefun_translator_enabled');
+        if (enabled !== null) {
+            isEnabled = enabled === 'true';
+        }
+    }
+    
+    function saveSettings() {
+        localStorage.setItem('minefun_translator_lang', targetLanguage);
+        localStorage.setItem('minefun_translator_enabled', isEnabled.toString());
+        clearTranslationCache();
+    }
+    
+    function clearTranslationCache() {
+        const translatedElements = document.querySelectorAll('[data-minefun-translated]');
+        translatedElements.forEach(el => {
+            delete el.dataset.minefunTranslated;
+            delete el.dataset.minefunOriginal;
+            delete el.dataset.minefunTranslation;
+            delete el.dataset.minefunSourceLang;
+            delete el.dataset.minefunShowingOriginal;
+            
+            const badge = el.querySelector('.minefun-translator-badge');
+            if (badge) {
+                badge.remove();
+            }
+        });
+    }
+    
+    function createSettingsPanel() {
+        if (settingsPanel) return;
+        
+        settingsPanel = document.createElement('div');
+        settingsPanel.id = 'minefun-translator-settings';
+        settingsPanel.style.cssText = `
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            background: rgba(20, 22, 26, 0.95);
+            border: 2px solid rgba(251, 191, 36, 0.3);
+            border-radius: 12px;
+            padding: 16px;
+            z-index: 999998;
+            min-width: 220px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: none;
+        `;
+        
+        const title = document.createElement('div');
+        title.style.cssText = `
+            color: rgba(251, 191, 36, 1);
+            font-size: 14px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        `;
+        title.textContent = 'Chat Translator';
+        
+        const toggle = document.createElement('label');
+        toggle.style.cssText = `
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+            cursor: pointer;
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 13px;
+        `;
+        
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = isEnabled;
+        checkbox.style.cssText = `
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+        `;
+        checkbox.addEventListener('change', (e) => {
+            isEnabled = e.target.checked;
+            saveSettings();
+        });
+        
+        toggle.appendChild(checkbox);
+        toggle.appendChild(document.createTextNode('Enable Translation'));
+        
+        const label = document.createElement('div');
+        label.style.cssText = `
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 12px;
+            margin-bottom: 6px;
+        `;
+        label.textContent = 'Translate to:';
+        
+        const select = document.createElement('select');
+        select.style.cssText = `
+            width: 100%;
+            background: rgba(30, 32, 36, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 6px;
+            padding: 8px;
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 13px;
+            cursor: pointer;
+        `;
+        
+        for (const [code, name] of Object.entries(languages)) {
+            const option = document.createElement('option');
+            option.value = code;
+            option.textContent = name;
+            if (code === targetLanguage) {
+                option.selected = true;
+            }
+            select.appendChild(option);
+        }
+        
+        select.addEventListener('change', (e) => {
+            targetLanguage = e.target.value;
+            saveSettings();
+        });
+        
+        const info = document.createElement('div');
+        info.style.cssText = `
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 11px;
+            line-height: 1.4;
+        `;
+        info.innerHTML = 'Press <strong style="color: rgba(251, 191, 36, 1);">T</strong> to toggle this panel<br>Settings auto-save and apply immediately';
+        
+        settingsPanel.appendChild(title);
+        settingsPanel.appendChild(toggle);
+        settingsPanel.appendChild(label);
+        settingsPanel.appendChild(select);
+        settingsPanel.appendChild(info);
+        
+        document.body.appendChild(settingsPanel);
+    }
+    
+    function toggleSettingsPanel() {
+        if (!settingsPanel) return;
+        
+        if (settingsPanel.style.display === 'none') {
+            settingsPanel.style.display = 'block';
+        } else {
+            settingsPanel.style.display = 'none';
+        }
+    }
+    
+    async function translateText(text, targetLang) {
+        try {
+            const response = await fetch('https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=' + targetLang + '&dt=t&q=' + encodeURIComponent(text));
+            const data = await response.json();
+            
+            if (data && data[0] && data[0][0] && data[0][0][0]) {
+                const translatedText = data[0][0][0];
+                const detectedLang = data[2] || 'unknown';
+                
+                return {
+                    translated: translatedText,
+                    sourceLang: detectedLang
+                };
+            }
+        } catch (error) {
+            console.error('Translation error:', error);
+        }
+        
+        return null;
+    }
+    
+    function getMessageId(element) {
+        const rect = element.getBoundingClientRect();
+        return element.textContent.trim() + '_' + rect.top + '_' + rect.left;
+    }
+    
+    async function translateChatMessage(messageElement) {
+        if (!isEnabled) return;
+        
+        if (messageElement.dataset.minefunTranslated) return;
+        
+        const originalText = messageElement.textContent.trim();
+        if (!originalText || originalText.length < 2) return;
+        
+        let username = '';
+        let messageText = originalText;
+        let hasColon = false;
+        
+        const colonIndex = originalText.indexOf(':');
+        if (colonIndex > 0 && colonIndex < 30) {
+            username = originalText.substring(0, colonIndex);
+            messageText = originalText.substring(colonIndex + 1).trim();
+            hasColon = true;
+        }
+        
+        if (messageText.length < 2) return;
+        
+        messageElement.dataset.minefunTranslated = 'processing';
+        
+        const result = await translateText(messageText, targetLanguage);
+        
+        if (!result) {
+            messageElement.dataset.minefunTranslated = 'skipped';
+            return;
+        }
+        
+        const { translated, sourceLang } = result;
+        
+        if (sourceLang === targetLanguage || sourceLang === 'unknown') {
+            messageElement.dataset.minefunTranslated = 'skipped';
+            return;
+        }
+        
+        if (translated && translated !== messageText && translated.toLowerCase() !== messageText.toLowerCase()) {
+            messageElement.dataset.minefunTranslated = 'done';
+            messageElement.dataset.minefunOriginal = messageText;
+            messageElement.dataset.minefunTranslation = translated;
+            messageElement.dataset.minefunSourceLang = sourceLang;
+            messageElement.dataset.minefunShowingOriginal = 'false';
+            
+            if (hasColon) {
+                messageElement.textContent = username + ': ' + translated;
+            } else {
+                messageElement.textContent = translated;
+            }
+            
+            const langNames = {
+                'ar': 'AR', 'zh': 'ZH', 'zh-CN': 'ZH', 'zh-TW': 'ZH',
+                'cs': 'CS', 'da': 'DA', 'nl': 'NL', 'en': 'EN',
+                'fi': 'FI', 'fr': 'FR', 'de': 'DE', 'el': 'EL',
+                'hi': 'HI', 'hu': 'HU', 'id': 'ID', 'it': 'IT',
+                'ja': 'JA', 'ko': 'KO', 'no': 'NO', 'pl': 'PL',
+                'pt': 'PT', 'ro': 'RO', 'ru': 'RU', 'es': 'ES',
+                'sv': 'SV', 'th': 'TH', 'tr': 'TR', 'vi': 'VI'
+            };
+            
+            const indicator = document.createElement('span');
+            indicator.className = 'minefun-translator-badge';
+            indicator.textContent = langNames[sourceLang] || sourceLang.toUpperCase().substring(0, 2);
+            indicator.title = 'Click to see original';
+            
+            indicator.addEventListener('click', (e) => {
+                e.stopPropagation();
+                
+                const showingOriginal = messageElement.dataset.minefunShowingOriginal === 'true';
+                const original = messageElement.dataset.minefunOriginal;
+                const translation = messageElement.dataset.minefunTranslation;
+                
+                if (showingOriginal) {
+                    if (hasColon) {
+                        messageElement.textContent = username + ': ' + translation;
+                    } else {
+                        messageElement.textContent = translation;
+                    }
+                    messageElement.dataset.minefunShowingOriginal = 'false';
+                } else {
+                    if (hasColon) {
+                        messageElement.textContent = username + ': ' + original;
+                    } else {
+                        messageElement.textContent = original;
+                    }
+                    messageElement.dataset.minefunShowingOriginal = 'true';
+                }
+                
+                const badge = document.createElement('span');
+                badge.className = 'minefun-translator-badge';
+                if (messageElement.dataset.minefunShowingOriginal === 'true') {
+                    badge.classList.add('showing-original');
+                    badge.title = 'Click to see translation';
+                } else {
+                    badge.title = 'Click to see original';
+                }
+                badge.textContent = langNames[sourceLang] || sourceLang.toUpperCase().substring(0, 2);
+                
+                badge.addEventListener('click', indicator.onclick);
+                
+                messageElement.appendChild(document.createTextNode(' '));
+                messageElement.appendChild(badge);
+            });
+            
+            messageElement.appendChild(document.createTextNode(' '));
+            messageElement.appendChild(indicator);
+        } else {
+            messageElement.dataset.minefunTranslated = 'skipped';
+        }
+    }
+    
+    function findChatMessages() {
+        const selectors = [
+            '[class*="chat"] [class*="message"]',
+            '[id*="chat"] [class*="message"]',
+            '[class*="chat"] div',
+            '[id*="chat"] div',
+            '.message',
+            '.chat-message'
+        ];
+        
+        const messages = [];
+        
+        for (const selector of selectors) {
+            const elements = document.querySelectorAll(selector);
+            for (const el of elements) {
+                if (el.dataset.minefunTranslated) continue;
+                
+                const text = el.textContent.trim();
+                
+                if (!text || text.length < 3) continue;
+                if (el.querySelector('input') || el.querySelector('button')) continue;
+                
+                const hasColon = text.includes(':') && text.indexOf(':') < 30 && text.indexOf(':') > 0;
+                if (!hasColon) continue;
+                
+                const beforeColon = text.substring(0, text.indexOf(':')).trim();
+                if (beforeColon.includes('"') || beforeColon.includes("'")) continue;
+                
+                const afterColon = text.substring(text.indexOf(':') + 1).trim();
+                if (afterColon.length < 2) continue;
+                
+                const looksLikeSystemMessage = 
+                    text.toLowerCase().includes('obtuvo') ||
+                    text.toLowerCase().includes('obtained') ||
+                    text.toLowerCase().includes('achievement') ||
+                    text.toLowerCase().includes('logro') ||
+                    text.toLowerCase().includes('died') ||
+                    text.toLowerCase().includes('muriÃ³') ||
+                    text.toLowerCase().includes('killed') ||
+                    text.toLowerCase().includes('matÃ³') ||
+                    text.toLowerCase().includes('joined') ||
+                    text.toLowerCase().includes('left') ||
+                    text.toLowerCase().includes('se uniÃ³') ||
+                    text.toLowerCase().includes('saliÃ³');
+                
+                if (looksLikeSystemMessage) continue;
+                
+                messages.push(el);
+            }
+        }
+        
+        return messages;
+    }
+    
+    function monitorChat() {
+        const messages = findChatMessages();
+        
+        for (const message of messages) {
+            translateChatMessage(message);
+        }
+    }
+    
+    function isInGame() {
+        return document.querySelector('canvas') !== null;
+    }
+    
+    let monitorInterval = null;
+    
+    function startMonitoring() {
+        if (monitorInterval) return;
+        
+        monitorInterval = setInterval(() => {
+            if (isInGame()) {
+                monitorChat();
+            }
+        }, 500);
+    }
+    
+    document.addEventListener('keydown', (e) => {
+        if (e.key.toLowerCase() === 't' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            const activeElement = document.activeElement;
+            if (activeElement.tagName !== 'INPUT' && activeElement.tagName !== 'TEXTAREA') {
+                e.preventDefault();
+                toggleSettingsPanel();
+            }
+        }
+    });
+    
+    loadSettings();
+    createSettingsPanel();
+    startMonitoring();
+})();
