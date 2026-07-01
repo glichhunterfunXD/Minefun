@@ -1,0 +1,890 @@
+(() => {
+    // ------------------------------ Event bus ------------------------------
+    var c={listeners:{},activeKeys:new Set,on:function(e,t){(this.listeners[e]||(this.listeners[e]=[])).push(t)},remove:function(e,t){if(this.listeners[e])this.listeners[e]=this.listeners[e].filter(i=>i!==t)},emit:function(e,t){if(this.listeners[e])this.listeners[e].forEach(i=>i(t))},trackKey:function(e,t,i){if(e==="keydown")h.handleKeyPress(i);if(e==="keydown"&&!this.activeKeys.has(t)){this.activeKeys.add(t);this.emit("keyPress",{key:t,code:i})}if(e==="keyup"&&this.activeKeys.has(t)){this.activeKeys.delete(t);this.emit("keyRelease",{key:t,code:i})}}};
+    
+    // ------------------------------ Notification system ------------------------------
+    var notificationContainer=null;function showNotification(e,t){if(!notificationContainer){notificationContainer=document.createElement("div");notificationContainer.style.cssText="position:fixed;bottom:20px;right:20px;z-index:10000;display:flex;flex-direction:column;align-items:flex-end;gap:8px;pointer-events:none;";document.body.appendChild(notificationContainer)}let i=document.createElement("div");i.className="liqclient-notification";i.style.cssText=`background:rgba(0,0,0,0.85);backdrop-filter:blur(8px);color:white;padding:8px 16px;border-radius:8px;font-family:'Product Sans',sans-serif;font-size:14px;border-left:4px solid ${t?"#4ade80":"#ff5555"};box-shadow:0 4px 12px rgba(0,0,0,0.3);transform:translateX(120%);transition:transform 0.3s cubic-bezier(0.2,0.9,0.4,1.1);pointer-events:none;max-width:280px;white-space:nowrap;`;i.textContent=`${t?"✅ Enabled":" Disabled"} : ${e}`;notificationContainer.appendChild(i);setTimeout(()=>{i.style.transform="translateX(0)"},10);setTimeout(()=>{i.style.transform="translateX(120%)";setTimeout(()=>{if(i.parentNode)i.parentNode.removeChild(i)},300)},2500)}
+    
+    // ------------------------------ Base Module ------------------------------
+    var a=class{constructor(e,t,i,n){this.name=e;this.category=t;this.options=i||{};this.keybind=n||null;this.waitingForBind=false;this.isEnabled=false;this.toggle=this.toggle.bind(this)}onEnable(){}onDisable(){}onRender(){}onSettingUpdate(){}enable(){this.isEnabled=true;c.emit("module.update",this);this.onEnable()}disable(){this.isEnabled=false;c.emit("module.update",this);this.onDisable()}toggle(){if(this.isEnabled){this.disable();showNotification(this.name,false)}else{this.enable();showNotification(this.name,true)}}};
+    var o={get stores(){if(this._stores)return this._stores;let e=app._vnode.component.appContext.provides;let t=e[Object.getOwnPropertySymbols(e).find(i=>e[i]._s)];return this._stores=t._s},get gameWorld(){return this.stores.get("gameState").gameWorld}};
+    var x={normalizeVector(e){let t=e.x*e.x+e.y*e.y+e.z*e.z;if(t>0){let i=1/Math.sqrt(t);return[e.x*i,e.y*i,e.z*i]}return e},distanceBetween(e,t){let i=t.x-e.x,n=t.y-e.y,a=t.z-e.z;return i*i+n*n+a*a},distanceBetweenSqrt(e,t){return Math.sqrt(this.distanceBetween(e,t))},calculateDistance(e,t){return Math.hypot(t.x-e.x,t.y-e.y,t.z-e.z)},calculateDistanceArr(e,t){return Math.hypot(t[0]-e[0],t[1]-e[1],t[2]-e[2])}};
+    var m={getClosestPlayer(){let e=o.gameWorld.player.position,t=o.gameWorld.server.players,i=[];t.forEach((n,a)=>{let s=x.distanceBetween(e,{x:n._model.position.x,y:n._model.position.y,z:n._model.position.z});n.id=a;i.push({player:n,distance:s})});i.sort((n,a)=>n.distance-a.distance);return i.map(n=>n.player)[0]},hexToRgb(e){let t=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(e);return t?{r:parseInt(t[1],16),g:parseInt(t[2],16),b:parseInt(t[3],16)}:null},getCssRule(e){for(let t of document.styleSheets)for(let i of t.cssRules||[])if(i.selectorText?.includes(e))return i;return null},openOtherItem(e){let t=Object.values(o.gameWorld.player.position).map(Math.floor),i=o.gameWorld.systemsManager.activeSystems.find(n=>n?.openOtherItem);o.stores.get("inventoryState").setBackpackStates(0);setTimeout(()=>{i.openOtherItem(t,e)},100)}};
+    var p={toServer:{TIME_STEP_INFO:1,REQUEST_RESPAWN:4,GOT_DAMAGE:27,PARKOUR_REQUEST_RESPAWN:1004,ONE_BLOCK_REQUEST_RESPAWN:1552,BED_WARS_REQUEST_RESPAWN:1600,SANDBOX_REQUEST_RESPAWN:1700},toClient:{SET_WALK_MODE:41,SET_INVISIBLE_MODE:42},listeners:{},packetListener(e,t){Object.values(this.listeners).forEach(i=>{let n=i(e,t);if(n!=null)t=n});o.gameWorld.server.msgsToSend.push(e,t)},init(){c.on("render",()=>{if(o?.gameWorld?.server?.sendData&&o.gameWorld.server.sendData!==this.packetListener){this._ogSend=o.gameWorld.server.sendData;o.gameWorld.server.sendData=this.packetListener.bind(this)}})}};
+ 
+    // ================== GUI SYSTEM ==================
+    var E=class{constructor(e,t){this.module=e;this.container=t;this.components=[];this.initialized=false;this.isOpen=false}initialize(){if(this.initialized||!this.module?.options)return;Object.keys(this.module.options).forEach(e=>{let t=this.module.options[e],i=typeof t,n=e.match(/\((\d+)-(\d+)\)/);if(Array.isArray(t))this.addModeCycler(e);else if(n)this.addSlider(e,parseInt(n[1]),parseInt(n[2]));else if(e.toLowerCase().includes("color"))this.addColorPicker(e);else if(i==="boolean"||t==="true"||t==="false")this.addCheckbox(e);else if(i==="string"||e.includes("Fade"))this.addNumberInput(e);else this.addNumberInput(e)});this.addKeybind();this.components.forEach(e=>e.style.display="none");this.initialized=true}toggle(){this.isOpen=!this.isOpen;this.components.forEach(e=>{e.style.display=this.isOpen?"flex":"none";this.container.style.marginBottom=this.isOpen?"5px":"0px"})}addModeCycler(e){let t=document.createElement("div");t.className="gui-setting-container";let i=document.createElement("span");i.className="gui-setting-label";i.textContent=e;let n=document.createElement("div");n.textContent=this.module.options[e][0];n.style.cssText=`background:var(--button-color);color:var(--text-color);padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;font-family:monospace;text-align:center;min-width:55px;user-select:none;margin:4px 8px;transition:0.2s;border:1px solid rgba(255,255,255,0.1);`;n.addEventListener("click",()=>{let a=this.module.options[e];a.push(a.shift());n.textContent=a[0];c.emit("setting.update",this.module)});n.addEventListener("mouseenter",()=>n.style.background="var(--hover-color)");n.addEventListener("mouseleave",()=>n.style.background="var(--button-color)");t.appendChild(i);t.appendChild(n);this.container.appendChild(t);this.components.push(t)}addSlider(e,t,i){let n=document.createElement("div");n.className="gui-setting-container";let a=e.replace(/\(\d+-\d+\)/,"").trim(),o=document.createElement("span");o.className="gui-setting-label";o.textContent=a;let s=document.createElement("div");s.style.display="flex";s.style.alignItems="center";s.style.gap="6px";s.style.marginRight="5px";let l=document.createElement("span");l.style.color="var(--text-color)";l.style.fontSize="12px";l.style.fontFamily="monospace";l.textContent=this.module.options[e];let r=document.createElement("input");r.type="range";r.min=t;r.max=i;r.value=this.module.options[e];r.className="gui-slider";r.style.width="60px";r.addEventListener("input",d=>{let u=Number(d.target.value);l.textContent=u;this.module.options[e]=u;c.emit("setting.update",this.module)});s.appendChild(r);s.appendChild(l);n.appendChild(o);n.appendChild(s);this.container.appendChild(n);this.components.push(n)}addNumberInput(e){let t=document.createElement("div");t.className="gui-setting-container";let i=document.createElement("span");i.className="gui-setting-label";i.textContent=e;if(e.includes("Fade"))t.title="(only 1-100)";let n=document.createElement("input");n.type="text";n.className="gui-text-input";n.value=this.module.options[e];n.style.width="35px";n.style.fontSize="12px";let a=n.value;n.addEventListener("input",()=>{let o=n.value.trim();if(!isNaN(o)&&o!==""){a=o;this.module.options[e]=Number(o);c.emit("setting.update",this.module)}});n.addEventListener("blur",()=>{if(isNaN(n.value)||n.value.trim()==="")n.value=a});n.addEventListener("keydown",o=>{if(o.key==="Enter")n.blur()});t.appendChild(i);t.appendChild(n);this.container.appendChild(t);this.components.push(t)}addStringInput(e){let t=document.createElement("div");t.className="gui-setting-container";let i=document.createElement("span");i.className="gui-setting-label";i.textContent=e;let n=document.createElement("input");n.type="text";n.className="gui-text-input";n.value=this.module.options[e];n.addEventListener("input",()=>{this.module.options[e]=n.value.trim();c.emit("setting.update",this.module)});t.appendChild(i);t.appendChild(n);this.container.appendChild(t);this.components.push(t)}addCheckbox(e){let t=document.createElement("div");t.className="gui-setting-container";let i=document.createElement("span");i.className="gui-setting-label";i.textContent=e;let n=document.createElement("div");n.className="gui-checkbox";n.style.width="13px";n.style.height="13px";n.style.margin="7px";let a=this.module.options[e]===true||this.module.options[e]==="true";n.classList.toggle("enabled",a);n.addEventListener("click",()=>{let o=!n.classList.contains("enabled");n.classList.toggle("enabled",o);this.module.options[e]=o;c.emit("setting.update",this.module)});t.appendChild(i);t.appendChild(n);this.container.appendChild(t);this.components.push(t)}addColorPicker(e){let t=document.createElement("div");t.className="gui-setting-container";let i=document.createElement("span");i.className="gui-setting-label";i.textContent=e;let n=document.createElement("div");n.className="gui-color-picker";n.style.background=this.module.options[e];n.style.width="13px";n.style.height="13px";n.style.margin="7px";let a=document.createElement("input");a.type="color";a.className="gui-color-input";n.appendChild(a);a.addEventListener("input",o=>{n.style.background=o.target.value;this.module.options[e]=o.target.value;c.emit("setting.update",this.module)});n.addEventListener("click",()=>a.click());t.appendChild(i);t.appendChild(n);this.container.appendChild(t);this.components.push(t)}addKeybind(){let e=document.createElement("div");e.className="gui-setting-container";let t=document.createElement("span");t.className="gui-setting-label";t.textContent="Keybind";let i=document.createElement("div");i.className="gui-keybind-display";i.textContent=this.module.keybind||"None";i.style.cssText=`background:var(--button-color);padding:2px 6px;border-radius:3px;cursor:pointer;font-family:monospace;margin-right:8px;transition:0.1s;font-size:11px;`;i.addEventListener("click",()=>{i.textContent="press...";let n=a=>{a.stopPropagation();a.preventDefault();let o=a.code;if(o==="Escape")this.module.keybind=null;else this.module.keybind=o;i.textContent=this.module.keybind||"None";document.removeEventListener("keydown",n);this.module.waitingForBind=false};document.addEventListener("keydown",n);this.module.waitingForBind=true});e.appendChild(t);e.appendChild(i);this.container.appendChild(e);this.components.push(e)}};
+    
+    // ================== PANEL SYSTEM (FIXED ANIMATIONS HERE) ==================
+    var S=class{constructor(e,t={top:"200px",left:"200px"}){this.categoryName=e;this.panel=document.createElement("div");this.panel.className="gui-panel";this.panel.style.top=t.top;this.panel.style.left=t.left;this.header=document.createElement("div");this.header.className="gui-header";let i={"Combat":"⚔️","Movement":"","Visual":"👁️","Misc":"🧩","Menus":"📋","Fun":"🎆","World":"🌐"},n=i[e]||"⚙️";this.header.innerHTML=`<span class="gui-category-icon">${n}</span><span>${e}</span>`;this.panel.appendChild(this.header);document.body.appendChild(this.panel);this.buttons=[];this.setupDragHandling()}setupDragHandling(){let e=false,t=0,i=0;this.header.addEventListener("mousedown",n=>{e=true;t=n.clientX-this.panel.offsetLeft;i=n.clientY-this.panel.offsetTop});document.addEventListener("mousemove",n=>{if(e){this.panel.style.left=n.clientX-t+"px";this.panel.style.top=n.clientY-i+"px"}});document.addEventListener("mouseup",()=>e=false)}
+    
+    // --- CORE FIX: Store settings instance to prevent animation loss ---
+    addButton(e){
+        let t=document.createElement("div");t.className="gui-button-container";
+        let i=document.createElement("div");i.className=`gui-button ${e.isEnabled?"enabled":""}`;
+        i.textContent=e.name;i.style.fontSize="18px";
+        
+        // 1. Create Settings Instance ONCE
+        let n=new E(e,t);
+        i._guiSettings = n; // 2. Save it to the button element
+        
+        i.addEventListener("mousedown",a=>{
+            if(a.button===0){
+                e.toggle();i.classList.toggle("enabled",e.isEnabled)
+            }else if(a.button===1){
+                i.textContent="waiting..";e.waitingForBind=true;
+                let o=s=>{
+                    if(e.waitingForBind){
+                        s.preventDefault();s.stopPropagation();
+                        if(s.code==="Escape")e.keybind=null;else e.keybind=s.code;
+                        e.waitingForBind=false;i.textContent=e.name;
+                        document.removeEventListener("keydown",o)
+                    }
+                };
+                document.addEventListener("keydown",o)
+            }
+        });
+        
+        // 3. Use the SAVED instance for context menu (Fixes Animation)
+        i.addEventListener("contextmenu",a=>{
+            a.preventDefault();
+            if(i._guiSettings){
+                i._guiSettings.initialize();
+                i._guiSettings.toggle()
+            }
+        });
+        
+        i.setAttribute("tabindex",-1);
+        t.appendChild(i);this.panel.appendChild(t);this.buttons.push(i);return i
+    }
+    // -----------------------------------------------------------------------
+ 
+    show(){this.panel.style.display="block"}hide(){this.panel.style.display="none"}};
+    
+    function ce(e){let t=document.createElement("style");t.textContent=e;document.head.appendChild(t)}
+    ce(`@font-face{font-family:"Product Sans";src:url(https://fonts.gstatic.com/s/productsans/v19/pxiDypQkot1TnFhsFMOfGShVF9eO.woff2)}:root{--LiqClient-accent-color:linear-gradient(90deg,rgb(46,204,113) 0%,rgb(88,214,141) 100%);--button-color:rgb(40,40,40,0.9);--hover-color:rgb(50,50,50,0.9);--panel-bg:rgb(10,10,10,0.85);--text-color:#ffffff;--header-text-size:23px;--button-text-size:18px;--setting-text-size:14px}.gui-category-icon{margin-right:6px;font-size:18px;filter:grayscale(100%) brightness(0.6) drop-shadow(0px 1px 1px rgba(0,0,0,0.5))}.gui-panel{position:fixed;z-index:1000;width:190px;border-radius:8px;background-color:var(--panel-bg);box-shadow:0 4px 8px rgba(0,0,0,0.3);font-family:'Product Sans',sans-serif;color:var(--text-color);overflow:hidden}.gui-header{background-color:var(--header-bg);height:38px;font-weight:900;display:flex;align-items:center;justify-content:center;font-size:var(--header-text-size);cursor:grab}.gui-header:active{cursor:grabbing}.gui-button{height:32px;display:flex;align-items:center;padding-left:8px;box-sizing:border-box;cursor:pointer;border-radius:0;transition:all 0.3s;font-size:var(--button-text-size);font-weight:200;outline:none;background:var(--button-color);color:var(--text-color)}.gui-button.enabled{background:var(--LiqClient-accent-color)}.gui-button:not(.enabled):hover{background:var(--hover-color)}.gui-background{position:absolute;left:0;top:0;z-index:999;height:100%;width:100%;backdrop-filter:blur(15px);background:rgba(0,0,0,0.3)}.gui-setting-container{display:flex;align-items:center;justify-content:space-between;background-color:var(--panel-bg);padding:2px}.gui-setting-label{font-size:var(--setting-text-size);margin-left:8px;font-weight:300;color:var(--text-color)}.gui-checkbox{width:13px;height:13px;border-radius:3px;background:var(--button-color);position:relative;margin:7px;cursor:pointer;transition:background 0.3s}.gui-checkbox.enabled{background:var(--LiqClient-accent-color)}.gui-color-picker{width:13px;height:13px;border-radius:3px;position:relative;margin:7px;cursor:pointer}.gui-color-input{width:18px;height:18px;opacity:0;cursor:pointer}.gui-button-container{background-color:var(--panel-bg);display:flex;flex-direction:column}.gui-text-input{background:var(--button-color);border:none;color:var(--text-color);font-family:'Product Sans',sans-serif;font-size:var(--setting-text-size);width:35px;border-radius:3px;outline:none;transition:background 0.3s;text-align:center;margin:4px;margin-right:8px}.gui-text-input:hover,.gui-text-input:focus{background:var(--hover-color)}.gui-slider{-webkit-appearance:none;width:60px;height:3px;border-radius:2px;background:var(--button-color);outline:none;opacity:0.8;transition:opacity .2s}.gui-slider:hover{opacity:1}.gui-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:10px;height:10px;border-radius:50%;background:#4ade80;cursor:pointer}#liq-keystrokes{position:fixed;top:100px;left:20px;display:flex;flex-direction:column;gap:4px;font-family:'Product Sans',sans-serif;user-select:none;transform-origin:top left;z-index:9999}.ks-row{display:flex;gap:4px;justify-content:center}.ks-key{width:45px;height:45px;background:rgba(0,0,0,0.5);color:white;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:4px;font-weight:bold;transition:background 0.05s,transform 0.05s;font-size:16px;border:1px solid rgba(255,255,255,0.1)}.ks-key.active{background:rgba(255,255,255,0.6);color:black;transform:scale(0.95)}.ks-mouse{width:70px;font-size:14px}.ks-space{width:144px;height:25px}.ks-cps{font-size:10px;font-weight:normal;margin-top:2px;opacity:0.8}.ks-rgb .ks-key{color:var(--ks-rgb-color,white);border-color:var(--ks-rgb-color,rgba(255,255,255,0.1));text-shadow:0 0 5px var(--ks-rgb-color,transparent);box-shadow:inset 0 0 5px var(--ks-rgb-color,transparent),0 0 5px var(--ks-rgb-color,transparent)}.ks-rgb .ks-key.active{background:var(--ks-rgb-color,rgba(255,255,255,0.6));color:#000;text-shadow:none}.with-animations .gui-panel{animation:fadeInScale 0.3s ease-out}@keyframes fadeInScale{from{opacity:0;transform:scale(0.9)}to{opacity:1;transform:scale(1)}}.with-animations .gui-background{animation:fadeIn 0.3s ease-out}@keyframes fadeIn{from{opacity:0}to{opacity:1}}.with-animations .gui-button{transition:transform 0.2s ease,background 0.2s ease}.with-animations .gui-button:hover{transform:scale(1.01)}.with-animations .gui-setting-container{will-change:transform,opacity;transform-origin:top;animation:slideDown 0.25s ease-out forwards}@keyframes slideDown{from{opacity:0;transform:scaleY(0.8)}to{opacity:1;transform:scaleY(1)}}`);
+ 
+    // ================== VISUAL MODULES ==================
+    var ModArraylist = class extends a {
+        constructor() { super("Arraylist", "Visual"); this.namesMap = {}; this.arraylistContainer = null; this.initialized = false; }
+        update(e, t) {
+            if (t) {
+                if (!this.namesMap[e]) {
+                    let s = document.createElement("div"); s.style.backgroundColor = "rgba(10, 10, 10, 0.7)"; s.style.color = "white"; s.style.padding = "2px 10px"; s.style.display = "flex"; s.style.alignItems = "center"; s.style.fontFamily = "'Product Sans', sans-serif"; s.style.boxShadow = "rgb(0, 0, 0, 0.05) -5px 1px"; s.style.transition = "max-height 0.2s, opacity 0.2s"; s.style.overflow = "hidden"; s.style.maxHeight = "0"; s.style.opacity = "0";
+                    let n = document.createElement("span"); n.style.fontWeight = "800"; n.style.fontSize = "16px"; n.style.backgroundImage = "var(--LiqClient-accent-color)"; n.style.color = "transparent"; n.style.backgroundClip = "text"; n.innerHTML = e; s.appendChild(n); this.arraylistContainer.appendChild(s); setTimeout(() => { s.style.maxHeight = "50px"; s.style.opacity = "1"; }, 1); this.namesMap[e] = s;
+                }
+            } else if (this.namesMap[e]) { let s = this.namesMap[e]; s.style.maxHeight = "0"; s.style.opacity = "0"; setTimeout(() => { this.arraylistContainer.removeChild(s); delete this.namesMap[e]; }, 5); }
+            let i = Object.values(this.namesMap).sort((s, n) => n.getBoundingClientRect().width - s.getBoundingClientRect().width); this.arraylistContainer.innerHTML = ""; i.forEach(s => { this.arraylistContainer.appendChild(s); });
+        }
+        onEnable() {
+            if (this.initialized) this.arraylistContainer.style.opacity = "1";
+            else { this.arraylistContainer = document.createElement("div"); this.arraylistContainer.style.cssText = "flex-direction: column; position: absolute; z-index: 1000; display: flex; right: 5px; top: 5px; align-items: flex-end; pointer-events: none; text-transform: lowercase; border: 2px solid transparent; border-image: var(--LiqClient-accent-color); border-image-slice: 1; border-bottom: 0; border-left: 0;"; document.body.appendChild(this.arraylistContainer); c.on("module.update", e => { this.update(e.name, e.isEnabled); }); this.initialized = true; }
+        }
+        onDisable() { if (this.arraylistContainer) this.arraylistContainer.style.opacity = "0"; }
+    };
+ 
+    var ModWatermark = class extends a {
+        constructor() { super("Watermark", "Visual", { Text: "LiqClient" }); }
+        onSettingUpdate() { let e = document.querySelector(".LiqClient-overlay-title"); if (e) e.textContent = this.options.Text; }
+        onEnable() {
+            let e = document.querySelector(".LiqClient-overlay-title");
+            if (!e) { e = document.createElement("div"); e.className = "LiqClient-overlay-title"; e.textContent = this.options.Text; e.style.cssText = "position: absolute; top: 0; left: 0; padding: 0.5em; user-select: none; display: none; z-index: 1000; text-shadow: var(--LiqClient-accent-color) 0px 0px 10px; font-family: 'Product Sans', sans-serif; font-size: 24px; background: var(--LiqClient-accent-color); background-clip: text; -webkit-text-fill-color: transparent;"; document.body.appendChild(e); }
+            document.querySelector(".LiqClient-overlay-title").style.display = "flex";
+        }
+        onDisable() { let e = document.querySelector(".LiqClient-overlay-title"); if (e) e.style.display = "none"; }
+    };
+ 
+    // 👁️ FIXED MODULE: NoFog (Aggressive Override + WebGL Hook)
+    var ModNoFog = class extends a {
+        constructor() { super("NoFog", "Visual", null); this._interval = null; this._origFog = null; }
+        onEnable() {
+            const cssId = 'liqclient-nofog-style';
+            if (!document.getElementById(cssId)) {
+                const style = document.createElement('style');
+                style.id = cssId;
+                style.textContent = `
+                    canvas { filter: none !important; }
+                    .fog, .fog-overlay, .weather-fog, .distance-fade, .view-distance, .atmosphere,
+                    [class*="fog"], [class*="mist"], [class*="haze"] {
+                        display: none !important; visibility: hidden !important; opacity: 0 !important; pointer-events: none !important;
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+            const gw = o.gameWorld;
+            if (gw?.scene) {
+                this._origFog = gw.scene.fog || null;
+                gw.scene.fog = null;
+                if (gw.renderer?.setFog) gw.renderer.setFog(null);
+            }
+            this._interval = setInterval(() => {
+                const g = o.gameWorld;
+                if (g?.scene?.fog) g.scene.fog = null;
+            }, 250);
+        }
+        onDisable() {
+            const style = document.getElementById('liqclient-nofog-style');
+            if (style) style.remove();
+            if (this._interval) clearInterval(this._interval);
+            const gw = o.gameWorld;
+            if (gw?.scene && this._origFog) {
+                gw.scene.fog = this._origFog;
+                this._origFog = null;
+            }
+        }
+    };
+ 
+    // 👁️ NEW MODULE: BetterScreen (Visual Enhancement)
+    var ModBetterScreen = class extends a {
+        constructor() {
+            super("BetterScreen", "Visual", {
+                "Blur (0-10px)": 2,
+                "Contrast (0.5-2.0)": 1.2,
+                "Saturation (0.5-2.0)": 1.5,
+                "Brightness (0.5-2.0)": 1.0
+            });
+            this._originalFilter = "";
+        }
+        
+        _buildFilter() {
+            const blur = parseFloat(this.options["Blur (0-10px)"]) || 0;
+            const contrast = parseFloat(this.options["Contrast (0.5-2.0)"]) || 1;
+            const saturation = parseFloat(this.options["Saturation (0.5-2.0)"]) || 1;
+            const brightness = parseFloat(this.options["Brightness (0.5-2.0)"]) || 1;
+            
+            return `blur(${blur}px) contrast(${contrast}) saturate(${saturation}) brightness(${brightness})`;
+        }
+        
+        _applyFilter() {
+            const gameEl = document.querySelector("#game") || document.querySelector("canvas");
+            if (gameEl) {
+                this._originalFilter = gameEl.style.filter || "";
+                gameEl.style.filter = this._buildFilter();
+                gameEl.style.transition = "filter 0.3s ease";
+            }
+        }
+        
+        _removeFilter() {
+            const gameEl = document.querySelector("#game") || document.querySelector("canvas");
+            if (gameEl) {
+                gameEl.style.filter = this._originalFilter;
+            }
+        }
+        
+        onEnable() {
+            this._applyFilter();
+        }
+        
+        onDisable() {
+            this._removeFilter();
+        }
+        
+        onSettingUpdate() {
+            if (this.isEnabled) this._applyFilter();
+        }
+    };
+ 
+    var ModClickGUI = class extends a {
+        constructor() { super("ClickGUI", "Visual", { "Accent Color 1": "rgb(46, 204, 113)", "Accent Color 2": "rgb(88, 214, 141)", "Button Color": "rgb(40, 40, 40, 0.9)", "Hover Color": "rgb(50, 50, 50, 0.9)", "Header Color": "rgb(0, 0, 0, 0.85)", "Panel Color": "rgb(18 18 18)", "Text Color": "#ffffff", "Enable Animations": true }, "ShiftRight"); this.GUILoaded = false; this.panels = []; this.blurredBackground = null; this.updateColors(); }
+        updateAnimations() { if (this.options["Enable Animations"]) document.body.classList.add("with-animations"); else document.body.classList.remove("with-animations"); }
+        updateColors() { document.body.style.setProperty("--LiqClient-accent-color", `linear-gradient(90deg, ${this.options["Accent Color 1"]} 0%, ${this.options["Accent Color 2"]} 100%)`); document.body.style.setProperty("--button-color", this.options["Button Color"]); document.body.style.setProperty("--hover-color", this.options["Hover Color"]); document.body.style.setProperty("--header-bg", this.options["Header Color"]); document.body.style.setProperty("--panel-bg", this.options["Panel Color"]); document.body.style.setProperty("--text-color", this.options["Text Color"]); }
+        onEnable() { if (document.pointerLockElement) document.exitPointerLock(); if (this.GUILoaded) { this.showGUI(); this.updateAnimations(); } else { this.setupBackground(); this.createPanels(); this.setupEventListeners(); this.GUILoaded = true; this.updateAnimations(); } let e = m.getCssRule(".pause-cont"); if (e) e.style.display = "none"; this.fixCanvas(); }
+        fixCanvas() { let gameEl = document.querySelector("#game"); if (gameEl) gameEl.dispatchEvent(new Event("resize", { bubbles: true })); }
+        setupBackground() { this.blurredBackground = document.createElement("div"); this.blurredBackground.className="gui-background"; document.body.appendChild(this.blurredBackground); }
+        createPanels() {
+            let categories = [ 
+                { title: "Combat", position: { top: "100px", left: "100px" } }, 
+                { title: "Movement", position: { top: "100px", left: "305px" } }, 
+                { title: "Visual", position: { top: "100px", left: "510px" } }, 
+                { title: "Misc", position: { top: "100px", left: "715px" } }, 
+                { title: "Menus", position: { top: "100px", left: "920px" } },
+                { title: "Fun", position: { top: "100px", left: "1125px" } },
+                { title: "World", position: { top: "100px", left: "1330px" } }
+            ];
+            this.panels.forEach(p => { if (p.panel && p.panel.parentNode) p.panel.parentNode.removeChild(p.panel); }); this.panels = [];
+            categories.forEach(cat => { this.panels.push(new S(cat.title, cat.position)); });
+            let modulesByCat = {}; Object.values(h.modules).forEach(mod => { if (!modulesByCat[mod.category]) modulesByCat[mod.category] = []; modulesByCat[mod.category].push(mod); });
+            Object.entries(modulesByCat).forEach(([catName, mods]) => { let panel = this.panels.find(p => p.categoryName === catName); if (panel) { mods.sort((a, b) => b.name.length - a.name.length); mods.forEach(mod => panel.addButton(mod)); } });
+        }
+        setupEventListeners() { c.on("module.update", (module) => { let panel = this.panels.find(p => p.categoryName === module.category); if (!panel) return; let btn = panel.buttons.find(b => b.textContent === module.name); if (btn) btn.classList.toggle("enabled", module.isEnabled); }); }
+        showGUI() { this.panels.forEach(p => p.show()); this.blurredBackground.style.display = "block"; }
+        onDisable(keepClick = true) { this.panels.forEach(p => p.hide()); this.blurredBackground.style.display = "none"; let e = m.getCssRule(".pause-cont"); if (e) e.style.display = ""; let i = document.getElementsByClassName("pause-cont")[0]; if (i) i.style.display = "none"; this.fixCanvas(); let s = document.querySelector("#game"); if (keepClick && s) s.click(); }
+        onSettingUpdate() { this.updateColors(); this.updateAnimations(); }
+    };
+ 
+    // 👁️ MODULE: Chams (Fixed & Simplified)
+    var ModChams = class extends a {
+        constructor() { 
+            super("Chams", "Visual", null); 
+        }
+        onRender() { 
+            if (!o?.gameWorld?.player || !o.gameWorld.server?.players) return;
+            o.gameWorld.server.players.forEach(player => { 
+                if (player && player.playerMaterial) {
+                    player.playerMaterial.wireframe = false;
+                    player.playerMaterial.depthTest = false;
+                    if (player.playerMaterial.color) {
+                        player.playerMaterial.color.r = 1; player.playerMaterial.color.g = 0; player.playerMaterial.color.b = 1;
+                    }
+                    if (player.playerMaterial.opacity !== undefined) player.playerMaterial.opacity = 0.7;
+                    if (player.playerMaterial.transparent !== undefined) player.playerMaterial.transparent = true;
+                }
+            });
+        }
+        onDisable() { 
+            if (o.gameWorld?.server?.players) {
+                o.gameWorld.server.players.forEach(player => { 
+                    if (player && player.playerMaterial) {
+                        player.playerMaterial.depthTest = true;
+                        player.playerMaterial.wireframe = false;
+                        player.playerMaterial.opacity = 1;
+                        player.playerMaterial.transparent = false;
+                    }
+                });
+            }
+        }
+    };
+ 
+    var ModBlockOutline = class extends a {
+        constructor() { super("BlockOutline", "Visual", { "Outline Color": "#81e1ff" }); }
+        get selectedBlock() { return o.gameWorld?.systemsManager.activeSystems.find(e => e?.currBlockPos !== undefined) || undefined; }
+        onRender() { if (this?.selectedBlock?.mesh) { let e = m.hexToRgb(this.options["Outline Color"]); if (e && (this.selectedBlock.mesh.material.color.r !== e.r)) this.onEnable(); } }
+        onEnable() { let e = m.hexToRgb(this.options["Outline Color"]); if (!e || !this.selectedBlock?.mesh) return; let t = this.selectedBlock.mesh; Object.keys(e).forEach(i => { t.material.color[i] = e[i]; }); }
+        onDisable() { if (this.selectedBlock?.mesh) { this.selectedBlock.mesh.material.color.r = 0; this.selectedBlock.mesh.material.color.g = 0; this.selectedBlock.mesh.material.color.b = 0; } }
+    };
+ 
+    var ModInterface = class extends a {
+        constructor() { super("Interface", "Visual", { "Hide Right Elements": true, "Bottom Chat": true }); }
+        applyTweaks() { let i = this.isEnabled; let s = m.getCssRule("chat-wrapper"); let n = m.getCssRule("key-prompt-wrapper"); if (i && this.options["Hide Right Elements"] && n) n.style.display = "none"; else if (n) n.style.display = "flex"; if (i && this.options["Bottom Chat"] && s) { s.style.bottom = "10%"; s.style.top = ""; s.style.position = "fixed"; } else if (s) { s.style.bottom = ""; s.style.top = "0"; s.style.position = "absolute"; } }
+        onEnable() { this.applyTweaks(); } onDisable() { this.applyTweaks(); }
+    };
+ 
+    var ModFreecam = class extends a {
+        constructor() { super("Freecam", "Visual", { "3rd person": "true" }); this._copy = null; this.realPos = null; }
+        get playerModel() { return o.gameWorld.systemsManager.activeSystems.find(e => e?.model).model; }
+        onEnable() { let e = o.gameWorld; let t = 0; if (e.player.cameraMode == 1 && this.options["3rd person"] == "true") { o.gameWorld.switchCameraView(); t = 100; } o.gameWorld.server.msgsListeners[p.toClient.SET_INVISIBLE_MODE](); setTimeout(() => { this._copy = this._copy || this.playerModel.position.copy; this.playerModel.position.copy = () => { }; this.realPos = this.playerModel.position; }, t); }
+        onDisable() { o.gameWorld.server.msgsListeners[p.toClient.SET_WALK_MODE](); if (this.playerModel && this._copy) { this.playerModel.position.copy = this._copy.bind(this.playerModel.position); this.playerModel.position = this.realPos; } }
+    };
+ 
+    var ModXray = class extends a {
+        constructor() { super("Xray", "Visual", null); }
+        getItemByName(e) { return Object.values(o.gameWorld.items).find(t => t.name == e); }
+        blocksToXray = ["Dirt", "Cobblestone", "Stone"];
+        onEnable() { $assetsUrls["game/textures/blocksTextures/Transparent.png"] = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="; this.blocksToXray.forEach(e => { let t = this.getItemByName(e); if (t) { t.transparent = true; t.textures = { other: "Transparent" }; t.lightRadius = 15; t.lightRGB = [1, 1, 1]; } }); this.reloadLighting(); alert("Rejoin game to apply"); }
+        onDisable() { this.blocksToXray.forEach(e => { let t = this.getItemByName(e); if (t) { t.transparent = false; t.textures = { other: e }; t.lightRadius = 0; t.lightRGB = [0, 0, 0]; } }); this.reloadLighting(); }
+        reloadLighting() { if (o.gameWorld.chunkManager) { o.gameWorld.chunkManager.lightConfig.byBlockId = []; o.gameWorld.chunkManager.lightConfig.reloadBlocks(); } }
+    };
+ 
+    var ModTracers = class extends a {
+        constructor() { super("Tracers", "Visual", { "Thickness (1-10)": 2, "Tracer Color": "#ff3333", "Target Players": true, "Target Bots/Mobs": true }); this.canvas = null; this.ctx = null; this.animationId = null; this.resizeHandler = this.resize.bind(this); }
+        initCanvas() { if (this.canvas) return; this.canvas = document.createElement("canvas"); this.canvas.style.cssText = "position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 9997; pointer-events: none;"; document.body.appendChild(this.canvas); this.ctx = this.canvas.getContext("2d"); this.resize(); window.addEventListener("resize", this.resizeHandler); }
+        resize() { if (!this.canvas) return; this.canvas.width = window.innerWidth; this.canvas.height = window.innerHeight; }
+        onEnable() {
+            this.initCanvas();
+            let draw = () => {
+                if (!this.isEnabled || !this.ctx) return;
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                let me = o?.gameWorld?.player; let players = o?.gameWorld?.server?.players;
+                if (me && players) {
+                    this.ctx.lineWidth = this.options["Thickness (1-10)"] || 2; this.ctx.strokeStyle = this.options["Tracer Color"];
+                    players.forEach(p => {
+                        if (p === me || !p.isAlive || !p.model) return;
+                        let isBot = p.name === "Zombie" || p.name === "Skeleton" || !p.name;
+                        if (isBot && !this.options["Target Bots/Mobs"]) return; if (!isBot && !this.options["Target Players"]) return;
+                        let myPos = me.position; let ePos = p.model.position;
+                        let cx = this.canvas.width / 2; let cy = this.canvas.height / 2;
+                        let dx = ePos.x - myPos.x; let dy = (ePos.y + 0.8) - (myPos.y + 1.6); let dz = ePos.z - myPos.z;
+                        let yRad = me.rotation.y; let cosY = Math.cos(yRad); let sinY = Math.sin(yRad);
+                        let x1 = dx * cosY - dz * sinY; let z1 = dx * sinY + dz * cosY;
+                        let xRad = me.rotation.x; let cosX = Math.cos(xRad); let sinX = Math.sin(xRad);
+                        let y2 = dy * cosX - z1 * sinX; let z2 = dy * sinX + z1 * cosX; let x2 = x1;
+                        if (z2 < 0) {
+                            let depth = -z2; let fovScale = this.canvas.height; 
+                            let screenX = cx + (x2 / depth) * fovScale; let screenY = cy - (y2 / depth) * fovScale;
+                            this.ctx.beginPath(); this.ctx.moveTo(cx, this.canvas.height); this.ctx.lineTo(screenX, screenY); this.ctx.stroke();
+                        }
+                    });
+                }
+                this.animationId = requestAnimationFrame(draw);
+            };
+            draw();
+        }
+        onDisable() { if (this.animationId) cancelAnimationFrame(this.animationId); if (this.canvas) { window.removeEventListener("resize", this.resizeHandler); this.canvas.remove(); this.canvas = null; this.ctx = null; } }
+    };
+ 
+    // ================== FUN MODULES ==================
+    var ModWeatherScreen = class extends a {
+        constructor() { super("WeatherScreen", "Fun", { "Rain Mode": false, "Snow Mode": false, "Lightning Mode": false, "Dark Mode": false, "Fade (1-100)": 20, "Radius (1-10)": 5 }); this.canvas = null; this.ctx = null; this.rainParts = []; this.snowParts = []; this.animationId = null; this.resizeHandler = this.resize.bind(this); }
+        initCanvas() { if (this.canvas) return; this.canvas = document.createElement("canvas"); this.canvas.style.cssText = "position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 9998; pointer-events: none;"; document.body.appendChild(this.canvas); this.ctx = this.canvas.getContext("2d"); this.resize(); window.addEventListener("resize", this.resizeHandler); }
+        resize() { if (!this.canvas) return; this.canvas.width = window.innerWidth; this.canvas.height = window.innerHeight; this.initParticles(); }
+        initParticles() { this.rainParts = []; this.snowParts = []; let radius = this.options["Radius (1-10)"]; if (isNaN(radius) || radius < 1) radius = 5; let amount = radius * 50; for (let i = 0; i < amount; i++) { this.rainParts.push(this.createParticle(false)); this.snowParts.push(this.createParticle(true)); } }
+        createParticle(isSnow) { return { x: Math.random() * window.innerWidth, y: Math.random() * window.innerHeight, speed: isSnow ? (Math.random() * 1 + 0.5) : (Math.random() * 15 + 15), size: isSnow ? (Math.random() * 2 + 1) : (Math.random() * 1.5 + 0.5), angle: isSnow ? Math.random() * Math.PI * 2 : 0, swing: isSnow ? Math.random() * 0.05 : 0 }; }
+        onSettingUpdate() { if (this.isEnabled) { this.initParticles(); } }
+        onEnable() {
+            this.initCanvas(); this.initParticles();
+            let draw = () => {
+                if (!this.isEnabled || !this.ctx) return;
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                let isRain = this.options["Rain Mode"] === true || this.options["Rain Mode"] === "true"; let isSnow = this.options["Snow Mode"] === true || this.options["Snow Mode"] === "true"; let isLightning = this.options["Lightning Mode"] === true || this.options["Lightning Mode"] === "true"; let isDarkMode = this.options["Dark Mode"] === true || this.options["Dark Mode"] === "true";
+                if (isDarkMode) { let fade = this.options["Fade (1-100)"] / 100; if(fade > 1) fade = 1; if(fade < 0) fade = 0; this.ctx.fillStyle = `rgba(0, 0, 0, ${fade})`; this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height); }
+                if (isLightning && Math.random() < 0.005) { 
+                    this.ctx.fillStyle = "rgba(200, 220, 255, 0.4)"; this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+                    let boltCount = Math.floor(Math.random() * 3) + 1;
+                    for (let b = 0; b < boltCount; b++) {
+                        let startX = Math.random() * this.canvas.width; let startY = 0; let currX = startX, currY = startY; this.ctx.beginPath(); this.ctx.moveTo(currX, currY); let maxDepth = this.canvas.height * (0.5 + Math.random() * 0.5);
+                        while (currY < maxDepth) { currX += (Math.random() - 0.5) * 80; currY += Math.random() * 40 + 20; this.ctx.lineTo(currX, currY); }
+                        this.ctx.shadowBlur = 20; this.ctx.shadowColor = "rgb(150, 200, 255)"; this.ctx.lineWidth = Math.random() * 3 + 2; this.ctx.strokeStyle = "rgba(255, 255, 255, 0.9)"; this.ctx.stroke(); this.ctx.shadowBlur = 0;
+                    }
+                }
+                if (isSnow) {
+                    this.ctx.fillStyle = "rgba(255, 255, 255, 0.8)"; this.ctx.beginPath(); 
+                    for (let i = 0; i < this.snowParts.length; i++) { let p = this.snowParts[i]; p.y += p.speed; p.angle += p.swing; p.x += Math.sin(p.angle) * 0.8; this.ctx.moveTo(p.x, p.y); this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); if (p.y > this.canvas.height || p.x > this.canvas.width || p.x < 0) { this.snowParts[i] = this.createParticle(true); this.snowParts[i].y = -20; } }
+                    this.ctx.fill();
+                }
+                if (isRain) {
+                    this.ctx.strokeStyle = "rgba(180, 210, 255, 0.6)"; this.ctx.lineWidth = 1.5; this.ctx.beginPath(); 
+                    for (let i = 0; i < this.rainParts.length; i++) { let p = this.rainParts[i]; p.y += p.speed; p.x += 2; this.ctx.moveTo(p.x, p.y); this.ctx.lineTo(p.x + 2, p.y + p.speed * 0.5); if (p.y > this.canvas.height || p.x > this.canvas.width || p.x < 0) { this.rainParts[i] = this.createParticle(false); this.rainParts[i].y = -20; } }
+                    this.ctx.stroke(); 
+                }
+                this.animationId = requestAnimationFrame(draw);
+            };
+            draw();
+        }
+        onDisable() { if (this.animationId) cancelAnimationFrame(this.animationId); if (this.canvas) { window.removeEventListener("resize", this.resizeHandler); this.canvas.remove(); this.canvas = null; this.ctx = null; } this.rainParts = []; this.snowParts = []; }
+    };
+ 
+    var ModKeystrokes = class extends a {
+        constructor() { super("Keystrokes", "Fun", { "Show Space": true, "Show LMB": true, "Show RMB": true, "Show CPS": true, "RGB": false, "Edit position": false, "Scale (1-23)": 10 }); this.ui = null; this.clicksL = []; this.clicksR = []; this.isDragging = false; this.offsetX = 0; this.offsetY = 0; this._dragMove = (e) => { if (this.isDragging && this.ui) { this.ui.style.left = e.clientX - this.offsetX + "px"; this.ui.style.top = e.clientY - this.offsetY + "px"; } }; this._dragUp = () => { this.isDragging = false; }; this.keysMap = { "KeyW": "w", "KeyA": "a", "KeyS": "s", "KeyD": "d", "Space": "space" }; this._onKeyDown = (e) => { if(this.keysMap[e.code]) this.toggleKey(this.keysMap[e.code], true); }; this._onKeyUp = (e) => { if(this.keysMap[e.code]) this.toggleKey(this.keysMap[e.code], false); }; this._onMouseDown = (e) => { let now = Date.now(); if (e.button === 0) { this.toggleKey("lmb", true); this.clicksL.push(now); } if (e.button === 2) { this.toggleKey("rmb", true); this.clicksR.push(now); } }; this._onMouseUp = (e) => { if (e.button === 0) this.toggleKey("lmb", false); if (e.button === 2) this.toggleKey("rmb", false); }; }
+        toggleKey(id, state) { if (!this.ui) return; let el = this.ui.querySelector(`#key-${id}`); if (el) state ? el.classList.add("active") : el.classList.remove("active"); }
+        createUI() {
+            if (this.ui) return; this.ui = document.createElement("div"); this.ui.id = "liq-keystrokes";
+            this.ui.innerHTML = `<div class="ks-row"><div id="key-w" class="ks-key">W</div></div><div class="ks-row"><div id="key-a" class="ks-key">A</div><div id="key-s" class="ks-key">S</div><div id="key-d" class="ks-key">D</div></div><div class="ks-row" id="ks-mouse-row"><div id="key-lmb" class="ks-key ks-mouse">LMB<div class="ks-cps" id="cps-l">0 CPS</div></div><div id="key-rmb" class="ks-key ks-mouse">RMB<div class="ks-cps" id="cps-r">0 CPS</div></div></div><div class="ks-row" id="ks-space-row"><div id="key-space" class="ks-key ks-space">━━━</div></div>`;
+            document.body.appendChild(this.ui); this.ui.addEventListener("mousedown", (e) => { if (this.options["Edit position"]) { this.isDragging = true; this.offsetX = e.clientX - this.ui.offsetLeft; this.offsetY = e.clientY - this.ui.offsetTop; } }); this.updateLayout();
+        }
+        updateLayout() {
+            if (!this.ui) return;
+            this.ui.querySelector("#ks-space-row").style.display = this.options["Show Space"] ? "flex" : "none"; this.ui.querySelector("#ks-mouse-row").style.display = (this.options["Show LMB"] || this.options["Show RMB"]) ? "flex" : "none"; this.ui.querySelector("#key-lmb").style.display = this.options["Show LMB"] ? "flex" : "none"; this.ui.querySelector("#key-rmb").style.display = this.options["Show RMB"] ? "flex" : "none"; this.ui.querySelector("#cps-l").style.display = this.options["Show CPS"] ? "block" : "none"; this.ui.querySelector("#cps-r").style.display = this.options["Show CPS"] ? "block" : "none";
+            if (this.options["RGB"]) this.ui.classList.add("ks-rgb"); else this.ui.classList.remove("ks-rgb");
+            let scaleVal = (this.options["Scale (1-23)"] || 10) / 10; this.ui.style.transform = `scale(${scaleVal})`;
+            if (this.options["Edit position"]) { this.ui.style.pointerEvents = "auto"; this.ui.style.cursor = "move"; this.ui.style.border = "1px dashed rgba(255,255,255,0.5)"; } else { this.ui.style.pointerEvents = "none"; this.ui.style.border = "none"; }
+        }
+        onSettingUpdate() { this.updateLayout(); }
+        onEnable() { window.addEventListener("keydown", this._onKeyDown, {capture:true}); window.addEventListener("keyup", this._onKeyUp, {capture:true}); window.addEventListener("mousedown", this._onMouseDown, {capture:true}); window.addEventListener("mouseup", this._onMouseUp, {capture:true}); window.addEventListener("mousemove", this._dragMove, {capture:true}); window.addEventListener("mouseup", this._dragUp, {capture:true}); this.createUI(); }
+        onRender() {
+            if (this.isEnabled && this.ui) {
+                if (this.options["RGB"]) { let hue = (Date.now() / 10 * 1.2) % 360; this.ui.style.setProperty('--ks-rgb-color', `hsl(${hue}, 100%, 65%)`); } else { this.ui.style.removeProperty('--ks-rgb-color'); }
+                if (this.options["Show CPS"]) { let now = Date.now(); this.clicksL = this.clicksL.filter(t => now - t < 1000); this.clicksR = this.clicksR.filter(t => now - t < 1000); this.ui.querySelector("#cps-l").textContent = this.clicksL.length + " CPS"; this.ui.querySelector("#cps-r").textContent = this.clicksR.length + " CPS"; }
+            }
+        }
+        onDisable() { if (this.ui) { this.ui.remove(); this.ui = null; } window.removeEventListener("keydown", this._onKeyDown, {capture:true}); window.removeEventListener("keyup", this._onKeyUp, {capture:true}); window.removeEventListener("mousedown", this._onMouseDown, {capture:true}); window.removeEventListener("mouseup", this._onMouseUp, {capture:true}); window.removeEventListener("mousemove", this._dragMove, {capture:true}); window.removeEventListener("mouseup", this._dragUp, {capture:true}); this.clicksL = []; this.clicksR = []; }
+    };
+ 
+    var ModHitParticles = class extends a {
+        constructor() { super("HitParticles", "Fun", { "Type": ["Star", "Heart", "Flame", "Smoke", "Spark", "Critical", "Bubble"], "Amount (1-100)": 15, "Size (1-50)": 15, "Life (100-5000)": 800, "Speed (1-50)": 20, "Gravity": false, "Random Motion": true, "Fade Out": true, "Rainbow Mode": true, "Particle Color": "#ff3333" }); this.canvas = null; this.ctx = null; this.particles = []; this.animationId = null; this.resizeHandler = this.resize.bind(this); }
+        initCanvas() { if (this.canvas) return; this.canvas = document.createElement("canvas"); this.canvas.style.cssText = "position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 9996; pointer-events: none;"; document.body.appendChild(this.canvas); this.ctx = this.canvas.getContext("2d"); this.resize(); window.addEventListener("resize", this.resizeHandler); }
+        resize() { if (!this.canvas) return; this.canvas.width = window.innerWidth; this.canvas.height = window.innerHeight; }
+        spawnParticles(hitX, hitY, hitZ) {
+            let amount = this.options["Amount (1-100)"]; let baseSize = this.options["Size (1-50)"] / 10; let speed = this.options["Speed (1-50)"] / 10; let life = this.options["Life (100-5000)"];
+            for (let i = 0; i < amount; i++) { this.particles.push({ x: hitX + (Math.random() - 0.5) * 0.8, y: hitY + (Math.random() - 0.5) * 0.8, z: hitZ + (Math.random() - 0.5) * 0.8, vx: (Math.random() - 0.5) * speed, vy: (Math.random() - 0.5) * speed + (this.options["Gravity"] ? Math.random() * speed : 0), vz: (Math.random() - 0.5) * speed, life: life, maxLife: life, size: baseSize * (0.5 + Math.random()), hue: Math.random() * 360 }); }
+        }
+        drawShape(x, y, size, color, type) {
+            this.ctx.fillStyle = color; this.ctx.strokeStyle = color; this.ctx.beginPath();
+            if (type === "star") { for (let i = 0; i < 5; i++) { this.ctx.lineTo(x + Math.cos((18 + i * 72) / 180 * Math.PI) * size, y - Math.sin((18 + i * 72) / 180 * Math.PI) * size); this.ctx.lineTo(x + Math.cos((54 + i * 72) / 180 * Math.PI) * (size/2), y - Math.sin((54 + i * 72) / 180 * Math.PI) * (size/2)); } this.ctx.closePath(); this.ctx.fill(); } 
+            else if (type === "heart") { this.ctx.moveTo(x, y + size/4); this.ctx.bezierCurveTo(x, y, x - size/2, y, x - size/2, y - size/4); this.ctx.bezierCurveTo(x - size/2, y - size/2, x, y - size/2, x, y - size/4); this.ctx.bezierCurveTo(x, y - size/2, x + size/2, y - size/2, x + size/2, y - size/4); this.ctx.bezierCurveTo(x + size/2, y, x, y, x, y + size/4); this.ctx.fill(); } 
+            else if (type === "spark" || type === "critical") { this.ctx.lineWidth = Math.max(1, size/4); this.ctx.moveTo(x - size, y); this.ctx.lineTo(x + size, y); this.ctx.moveTo(x, y - size); this.ctx.lineTo(x, y + size); this.ctx.stroke(); } 
+            else { this.ctx.arc(x, y, size, 0, Math.PI * 2); type === "bubble" ? this.ctx.stroke() : this.ctx.fill(); }
+        }
+        onEnable() {
+            this.initCanvas();
+            p.listeners.HitParticles = (r, e) => { if (r === 13 && this.isEnabled) { let hitX = e[1] + e[4] * e[7]; let hitY = e[2] + e[5] * e[7] + 0.8; let hitZ = e[3] + e[6] * e[7]; this.spawnParticles(hitX, hitY, hitZ); } };
+            let draw = () => {
+                if (!this.isEnabled || !this.ctx) return;
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                let me = o?.gameWorld?.player;
+                if (me && this.particles.length > 0) {
+                    let dt = 16.6; let myPos = me.position; let yRad = me.rotation.y; let cosY = Math.cos(yRad); let sinY = Math.sin(yRad); let xRad = me.rotation.x; let cosX = Math.cos(xRad); let sinX = Math.sin(xRad); let cx = this.canvas.width / 2; let cy = this.canvas.height / 2; let fovScale = this.canvas.height; 
+                    let type = this.options["Type"][0].toLowerCase();
+                    for (let i = this.particles.length - 1; i >= 0; i--) {
+                        let p = this.particles[i]; p.life -= dt;
+                        if (p.life <= 0) { this.particles.splice(i, 1); continue; }
+                        if (this.options["Random Motion"]) { p.vx += (Math.random()-0.5)*0.2; p.vy += (Math.random()-0.5)*0.2; p.vz += (Math.random()-0.5)*0.2; }
+                        if (this.options["Gravity"]) p.vy -= 0.05;
+                        p.x += p.vx * (dt/50); p.y += p.vy * (dt/50); p.z += p.vz * (dt/50);
+                        let dx = p.x - myPos.x; let dy = p.y - (myPos.y + 1.6); let dz = p.z - myPos.z;
+                        let x1 = dx * cosY - dz * sinY; let z1 = dx * sinY + dz * cosY; let y2 = dy * cosX - z1 * sinX; let z2 = dy * sinX + z1 * cosX; let x2 = x1;
+                        if (z2 < 0) {
+                            let depth = -z2; let screenX = cx + (x2 / depth) * fovScale; let screenY = cy - (y2 / depth) * fovScale;
+                            let renderSize = p.size * (fovScale / depth) * 0.02;
+                            if (renderSize > 100 || renderSize < 0.5) continue; 
+                            let alpha = this.options["Fade Out"] ? (p.life / p.maxLife) : 1;
+                            let r=255, g=51, b=51; if(!this.options["Rainbow Mode"]) { let hex = this.options["Particle Color"].replace('#',''); r = parseInt(hex.substring(0,2), 16); g = parseInt(hex.substring(2,4), 16); b = parseInt(hex.substring(4,6), 16); }
+                            let color = this.options["Rainbow Mode"] ? `hsla(${p.hue + (p.maxLife-p.life)*0.1}, 100%, 50%, ${alpha})` : `rgba(${r},${g},${b},${alpha})`;
+                            this.drawShape(screenX, screenY, renderSize, color, type);
+                        }
+                    }
+                }
+                this.animationId = requestAnimationFrame(draw);
+            };
+            draw();
+        }
+        onDisable() { if (this.animationId) cancelAnimationFrame(this.animationId); if (this.canvas) { window.removeEventListener("resize", this.resizeHandler); this.canvas.remove(); this.canvas = null; this.ctx = null; } this.particles = []; delete p.listeners.HitParticles; }
+    };
+ 
+    // ================== MOVEMENT MODULES ==================
+    var ModAirjump = class extends a { constructor() { super("Airjump", "Movement", null); } onRender() { if (o?.gameWorld?.player) o.gameWorld.player.collision.isGrounded = true; } };
+    
+    // 🪂 FIXED NoFall Module (Aggressive Reset)
+    var ModNoFall = class extends a {
+        constructor() { 
+            super("NoFall", "Movement", null);
+        }
+        onRender() {
+            const p = o?.gameWorld?.player;
+            if (p) {
+                if (p.collision) {
+                    p.collision.fallDistance = 0;
+                    p.collision.fallDist = 0;
+                    p.collision.falling = false;
+                }
+                if (p.fallDistance !== undefined) p.fallDistance = 0;
+            }
+        }
+    };
+    
+    // 🛡️ NEW MODULE: Velocity (Anti-KB)
+    var ModVelocity = class extends a {
+        constructor() {
+            super("Velocity", "Movement", {
+                "Horizontal": 90,
+                "Vertical": 100,
+                "Chance": 100,
+                "Only When Hit": true
+            });
+            this._lastVel = {x: 0, y: 0, z: 0};
+            this._kbDetected = false;
+        }
+        onRender() {
+            const p = o?.gameWorld?.player;
+            if (!p || !p.velocity?.velVec3) return;
+ 
+            const vel = p.velocity.velVec3;
+            const dx = vel.x - this._lastVel.x;
+            const dz = vel.z - this._lastVel.z;
+            const suddenMove = Math.sqrt(dx*dx + dz*dz) > 0.12;
+            const isHurt = p.hurtTime > 0;
+ 
+            if ((suddenMove || isHurt) && (!this.options["Only When Hit"] || isHurt)) {
+                if (Math.random() * 100 <= this.options["Chance"]) {
+                    const hFactor = (100 - this.options["Horizontal"]) / 100;
+                    const vFactor = (100 - this.options["Vertical"]) / 100;
+                    vel.x *= hFactor;
+                    vel.z *= hFactor;
+                    vel.y *= vFactor;
+                    this._kbDetected = true;
+                }
+            }
+            this._lastVel = {x: vel.x, y: vel.y, z: vel.z};
+            this._kbDetected = false;
+        }
+        onDisable() {
+            this._lastVel = {x: 0, y: 0, z: 0};
+            this._kbDetected = false;
+        }
+    };
+ 
+    var ModFly = class extends a { constructor() { super("Fly", "Movement", { "Vertical Speed": 5 }); } onRender() { if (o?.gameWorld?.player) { o.gameWorld.player.velocity.gravity = 0; if (o.gameWorld.player.inputs.jump) o.gameWorld.player.velocity.velVec3.y = this.options["Vertical Speed"]; else if (o.gameWorld.player.inputs.crouch) o.gameWorld.player.velocity.velVec3.y = -this.options["Vertical Speed"]; else o.gameWorld.player.velocity.velVec3.y = 0; } } onDisable() { if (o.gameWorld.player) o.gameWorld.player.velocity.gravity = 23; } };
+    var ModSpeed = class extends a { constructor() { super("Speed", "Movement", { Speed: 15 }); } onRender() { if (o?.gameWorld?.player) { o.gameWorld.player.velocity.moveSpeed = this.options.Speed; o.gameWorld.player.velocity.fastMoveSpeed = this.options.Speed; } } onDisable() { if (o.gameWorld.player) o.gameWorld.player.velocity.moveSpeed = 4.5; o.gameWorld.player.velocity.fastMoveSpeed = 6.4; } };
+    var ModNoClip = class extends a { constructor() { super("NoClip", "Movement"); } get playerPhysicsSystem() { return o.gameWorld.systemsManager.activeSystems.find(e => e?.playerPhysicsSystem).playerPhysicsSystem; } onRender() { if (o?.gameWorld?.player) { this._og = this._og || this.playerPhysicsSystem.resolveBlockCollision; if (this.playerPhysicsSystem.resolveBlockCollision == this._og) this.playerPhysicsSystem.resolveBlockCollision = () => { }; } } onDisable() { if (this.playerPhysicsSystem) this.playerPhysicsSystem.resolveBlockCollision = this._og; } };
+    var ModTimer = class extends a { constructor() { super("Timer", "Movement", { Multiplier: 1.2 }); this.interval = null; } onEnable() { if (this.interval) clearInterval(this.interval); this.interval = setInterval(() => { let e = o.gameWorld.time; e.elapsedTimeMs += 20 * this.options.Multiplier; }, 20); } onDisable() { if (this.interval) clearInterval(this.interval); } };
+    var ModHighJump = class extends a { constructor() { super("HighJump", "Movement", { "Jump Height": 25 }); } onRender() { if (o.gameWorld.player) o.gameWorld.player.velocity.jumpSpeed = parseFloat(this.options["Jump Height"]); } onDisable() { if (o.gameWorld.player) o.gameWorld.player.velocity.jumpSpeed = 8.285714285714286; } };
+    var ModGroundSpeed = class extends a { constructor() { super("GroundSpeed", "Movement", { Speed: 15 }); } get playerPhysicsSystem() { return o.gameWorld.systemsManager.activeSystems.find(e => e?.playerPhysicsSystem).playerPhysicsSystem; } resetMovementSpeed() { if (o.gameWorld.player) { o.gameWorld.player.velocity.moveSpeed = 4.5; o.gameWorld.player.velocity.fastMoveSpeed = 6.4; } } onRender() { if (o?.gameWorld?.player) { if (o.gameWorld.player.collision.isGrounded) { o.gameWorld.player.velocity.moveSpeed = this.options.Speed; o.gameWorld.player.velocity.fastMoveSpeed = this.options.Speed; } else this.resetMovementSpeed(); } } onEnable() { let e = 0, t = 0; this.playerPhysicsSystem.BB.min.__defineGetter__("y", () => e - 0.1); this.playerPhysicsSystem.BB.max.__defineGetter__("y", () => t - 0.1); this.playerPhysicsSystem.BB.min.__defineSetter__("y", i => e = i); this.playerPhysicsSystem.BB.max.__defineSetter__("y", i => t = i); } onDisable() { this.resetMovementSpeed(); delete this.playerPhysicsSystem.BB.min.y; delete this.playerPhysicsSystem.BB.max.y; } };
+    var ModSpider = class extends a { constructor() { super("Spider", "Movement", { Speed: 5 }); } get playerPhysicsSystem() { return o.gameWorld.systemsManager.activeSystems.find(e => e?.playerPhysicsSystem).playerPhysicsSystem; } get upAgainstWall() { return this.playerPhysicsSystem.playerVelVec3.x == 0 || this.playerPhysicsSystem.playerVelVec3.z == 0; } onRender() { if (o?.gameWorld?.player && o.gameWorld.player.inputs.jump && this.upAgainstWall) o.gameWorld.player.velocity.velVec3.y = this.options.Speed; } };
+    var ModScaffold = class extends a { constructor() { super("Scaffold", "Movement", null); } onRender() { if (!o?.gameWorld?.player) return; let e = Object.values(o.gameWorld.player.position).splice(0,3).map(Math.floor); e[1]--; let t = o.gameWorld.player.currentInventoryItemId, i = o.gameWorld.chunkManager.getBlock(...e), s = o.gameWorld.items[i]?.replaceable || false; (i == 0 || s) && t && o.gameWorld.chunkManager.setBlock(...e, t, true, true); } };
+ 
+    var ModAutoSprint = class extends a {
+        constructor() {
+            super("AutoSprint", "Movement", {
+                "KeepSprint": true,
+                "OmniSprint": true
+            });
+        }
+        onRender() {
+            if (!o?.gameWorld?.player) return;
+            const player = o.gameWorld.player;
+            if (!player.inputs) return;
+            player.inputs.sprint = true;
+            player.inputs.shift = true; 
+            if (this.options["KeepSprint"]) {
+                if (player.hurtTime !== undefined) player.hurtTime = 0;
+                if (player.sprintTimeout !== undefined) player.sprintTimeout = 0;
+                if (player.noSprintTime !== undefined) player.noSprintTime = 0;
+                player.isSprinting = true;
+            }
+            if (this.options["OmniSprint"]) {
+                if (player.inputs.backward && !player.inputs.forward) player.inputs.forward = true;
+                if (player.velocity) player.velocity.isSprinting = true;
+            }
+        }
+        onDisable() {
+            if (o?.gameWorld?.player) o.gameWorld.player.isSprinting = false;
+        }
+    };
+ 
+    var ModStep = class extends a {
+        constructor() { 
+            super("Step", "Movement", null); 
+            this._backup = {};
+            this._lastPos = null;
+            this._climbCooldown = 0;
+        }
+        onEnable() {
+            const p = o.gameWorld?.player;
+            if (!p) return;
+            this._backup.stepHeight = p.stepHeight;
+            this._backup.collisionStep = p.collision?.stepHeight;
+            this._backup.bbMaxY = p.BB?.max?.y;
+            this._backup.velY = p.velocity?.velVec3?.y;
+            if (p.stepHeight !== undefined) p.stepHeight = 1.5;
+            if (p.collision?.stepHeight !== undefined) p.collision.stepHeight = 1.5;
+            if (p.BB?.max?.y !== undefined) p.BB.max.y = 1.9;
+            this._lastPos = {x: p.position.x, y: p.position.y, z: p.position.z};
+            this._climbCooldown = 0;
+        }
+        onRender() {
+            const p = o.gameWorld?.player;
+            if (!p) return;
+            if (p.stepHeight !== undefined) p.stepHeight = 1.5;
+            if (p.collision?.stepHeight !== undefined) p.collision.stepHeight = 1.5;
+            if (p.BB?.max?.y !== undefined) p.BB.max.y = 1.9;
+            if (this._climbCooldown > 0) this._climbCooldown--;
+            const dx = p.position.x - this._lastPos.x, dy = p.position.y - this._lastPos.y, dz = p.position.z - this._lastPos.z;
+            const horizDist = Math.sqrt(dx*dx + dz*dz);
+            const isMoving = horizDist > 0.04;
+            const isClimbing = dy > 0.012 && dy < 0.35 && isMoving && p.inputs?.forward;
+            const isOnGround = p.collision?.isGrounded || p.velocity?.velVec3?.y <= 0.01;
+            if (isClimbing && isOnGround && this._climbCooldown === 0) {
+                if (o.gameWorld?.time?.elapsedTimeMs !== undefined) o.gameWorld.time.elapsedTimeMs += 12;
+                if (p.velocity?.velVec3?.y !== undefined) p.velocity.velVec3.y = Math.max(p.velocity.velVec3.y, 0.38);
+                this._climbCooldown = 3;
+            }
+            this._lastPos = {x: p.position.x, y: p.position.y, z: p.position.z};
+        }
+        onDisable() {
+            const p = o.gameWorld?.player;
+            if (!p) return;
+            if (this._backup.stepHeight !== undefined) p.stepHeight = this._backup.stepHeight;
+            if (this._backup.collisionStep !== undefined && p.collision) p.collision.stepHeight = this._backup.collisionStep;
+            if (this._backup.bbMaxY !== undefined && p.BB?.max) p.BB.max.y = this._backup.bbMaxY;
+            if (this._backup.velY !== undefined && p.velocity?.velVec3) p.velocity.velVec3.y = this._backup.velY;
+            this._backup = {}; this._lastPos = null; this._climbCooldown = 0;
+        }
+    };
+ 
+    // ================== COMBAT MODULES ==================
+    var ModKillaura = class extends a {
+        constructor() {
+            super("Killaura", "Combat", {
+                "Y Offset": 1.62,
+                "Reach": 5,
+                "Delay": 100
+            });
+            this.lastExecutionTime = null;
+        }
+        onRender() {
+            const now = Date.now();
+            if (o?.gameWorld?.player && now - this.lastExecutionTime >= this.options.Delay) {
+                this.lastExecutionTime = now;
+                this.tryKill();
+            }
+        }
+        tryKill() {
+            const reach = this.options.Reach;
+            const yOffset = this.options["Y Offset"];
+            const target = m.getClosestPlayer();
+            if (!target) return;
+            
+            const playerPos = {
+                x: o.gameWorld.player.position.x,
+                y: o.gameWorld.player.position.y + yOffset,
+                z: o.gameWorld.player.position.z
+            };
+            const targetPos = target._model.position;
+            
+            let dir = {
+                x: playerPos.x - targetPos.x,
+                y: playerPos.y - targetPos.y,
+                z: playerPos.z - targetPos.z
+            };
+            const dist = Math.sqrt(dir.x*dir.x + dir.y*dir.y + dir.z*dir.z);
+            if (dist !== 0) {
+                dir.x /= dist; dir.y /= dist; dir.z /= dist;
+            }
+            dir.x = -dir.x; dir.y = -dir.y; dir.z = -dir.z;
+            
+            const actualDist = Math.sqrt(
+                Math.pow(playerPos.x - targetPos.x, 2) +
+                Math.pow(playerPos.y - targetPos.y, 2) +
+                Math.pow(playerPos.z - targetPos.z, 2)
+            );
+            
+            if (actualDist < reach) {
+                o.gameWorld.server.sendData(13, [
+                    o.gameWorld.time.localServerTimeMs,
+                    playerPos.x, playerPos.y, playerPos.z,
+                    dir.x, dir.y, dir.z,
+                    actualDist,
+                    target.id
+                ]);
+            }
+        }
+    };
+ 
+    var ModGunModifier = class extends a { 
+        constructor() { 
+            super("GunModifier", "Combat", { 
+                Spread: 0.5, 
+                "Bullets per shot": 100, 
+                "Firerate (ms)": 1, 
+                "Bullet distance": 1000, 
+                "Reload Time": 1, 
+                Recoil: false 
+            }); 
+        } 
+        get gunSystem() { return o.gameWorld.systemsManager.activeSystems.find(e => e?.bulletsSystem); } 
+        onEnable() { 
+            let e = this.gunSystem.playerShooter.currPlayerWeaponSpec; 
+            e.bulletsPerShot = this.options["Bullets per shot"]; 
+            e.firerateMs = this.options["Firerate (ms)"]; 
+            e.distance = this.options["Bullet distance"]; 
+            e.startSpread = this.options.Spread; 
+            e.reloadTimeMs = this.options["Reload Time"]; 
+            if (!this.options.Recoil) { e.recoilAttackY = 0; e.recoilAttackX = 0; } 
+        } 
+    };
+    
+    var ModAimbot = class extends a { 
+        constructor() { 
+            super("Aimbot", "Combat", { 
+                "On Aim": "true", 
+                "On Shoot": "true", 
+                "Y Offset": 0.5 
+            }); 
+            this.lastExecutionTime = null; 
+        } 
+        getClosestEnemy(e, t) { 
+            let i = null, s = Infinity; 
+            t.forEach(n => { 
+                if (n?.model?.position && n.isAlive) { 
+                    let l = x.calculateDistance(e.position, n.model.position); 
+                    if (l < s) { s = l; i = n; } 
+                } 
+            }); 
+            return i; 
+        } 
+        aimAtEnemy() { 
+            let e = o.gameWorld.player; 
+            let t = o.gameWorld.server.players; 
+            if (!e || !t) return; 
+            let i = this.getClosestEnemy(e, t); 
+            if (i) { 
+                let s = i.model.position; 
+                let n = e.position; 
+                let l = { x: s.x - n.x, z: s.z - n.z }; 
+                let d = Math.atan2(l.x, l.z); 
+                let u = parseFloat(this.options["Y Offset"]); 
+                let y = s.y + u - n.y; 
+                let f = Math.hypot(l.x, l.z); 
+                let g = Math.atan2(y, f); 
+                g = Math.max(Math.min(g, Math.PI / 2), -Math.PI / 2); 
+                let b = (d + Math.PI) % (2 * Math.PI); 
+                e.rotation.y = b; 
+                e.rotation.x = g; 
+            } 
+        } 
+        onRender() { 
+            if (o?.gameWorld?.server) { 
+                if (this.options["On Aim"] == "true" && o.gameWorld.player.inputs.rightMB) this.aimAtEnemy(); 
+                else if (this.options["On Shoot"] == "true" && o.gameWorld.player.inputs.leftMB) this.aimAtEnemy(); 
+                else if (this.options["On Shoot"] !== "true" && this.options["On Aim"] !== "true") this.aimAtEnemy(); 
+            } 
+        } 
+    };
+ 
+    // ================== MISC MODULES ==================
+    var ModInstabreak = class extends a { constructor() { super("Instabreak", "Misc", null); this.originalHardness = new Map(); } onEnable() { Object.values(o.gameWorld.items).forEach(e => { if (e?.destruction) { if (!this.originalHardness.has(e)) this.originalHardness.set(e, e.destruction.durability); e.destruction.durability = 0; } }); } onDisable() { Object.values(o.gameWorld.items).forEach(e => { if (e?.destruction && this.originalHardness.has(e)) e.destruction.durability = this.originalHardness.get(e); }); } };
+    
+    var ModNuker = class extends a { 
+        constructor() { 
+            super("Nuker", "Misc", { 
+                Radius: 4, 
+                Delay: 120, 
+                "Target Selected Block": false, 
+                "Auto Disable": false 
+            }); 
+            this.blockIndex = 0; 
+        } 
+        get selectedBlock() { return o.gameWorld?.systemsManager.activeExecuteSystems.find(e => e?.currBlockPos !== undefined) || undefined; } 
+        onDisable() { this.blockIndex = 0; } 
+        onEnable() { 
+            this.blockIndex = 0; 
+            let e = this.options.Radius; 
+            let t = Object.values(o.gameWorld.player.position).map(Math.floor); 
+            t[1]--; 
+            if (this.options["Target Selected Block"] && this.selectedBlock) t = [...this.selectedBlock.currBlockPos]; 
+            let i = -e, s = -e, n = -e, l = []; 
+            for (; i <= e;) { 
+                for (; s <= e;) { 
+                    for (; n <= e;) { 
+                        if (Math.sqrt(i * i + s * s + n * n) <= e) { 
+                            let f = [t[0] + i, t[1] + s, t[2] + n]; 
+                            if (o.gameWorld.chunkManager.getBlock(...f) !== 0) l.push(f); 
+                        } 
+                        n++; 
+                    } 
+                    n = -e; s++; 
+                } 
+                s = -e; i++; 
+            } 
+            let d = this, u = this.options; 
+            function y() { 
+                if (d.isEnabled) { 
+                    if (d.blockIndex < l.length) { 
+                        let [f, g, b] = l[d.blockIndex]; 
+                        setTimeout(() => { 
+                            if (d.isEnabled) { 
+                                o.gameWorld.chunkManager.setBlock(f, g, b, 0, true); 
+                                d.blockIndex++; 
+                                y(); 
+                            } 
+                        }, u.Delay); 
+                    } else { 
+                        d.blockIndex = 0; 
+                        if (u["Auto Disable"]) d.disable(); 
+                        else if (d.isEnabled) d.onEnable(); 
+                    } 
+                } 
+            } 
+            y(); 
+        } 
+    };
+    
+    var ModAdBypass = class extends a { constructor() { super("AdBypass", "Misc"); } onEnable() { this._reward = this._reward || o.stores.get("adsStore").rewardCommercialVideoWrapper; o.stores.get("adsStore").rewardCommercialVideoWrapper = () => true; } onDisable() { o.stores.get("adsStore").rewardCommercialVideoWrapper = () => this._reward; } };
+    var ModFreeHeadcoins = class extends a { constructor() { super("FreeHeadcoins", "Misc"); } async onEnable() { let e = await o.network.get("users/freeSpinner"); o.stores.get("userState").user.balance.headcoins += e.data.amount; h.modules.FreeHeadcoins.disable(); } };
+    var ModFill = class extends a { constructor() { super("Fill", "Misc", { Radius: 4, "Block ID": 652, "Chunk Interval": 500 }); this.lastExecutionTime = 0; } onRender() { if (!o?.gameWorld?.player) return; let e = this.options.Radius; let t = this.options["Chunk Interval"]; let i = Date.now(); if (i - this.lastExecutionTime >= t) { this.lastExecutionTime = i; let s = Object.values(o.gameWorld.player.position).splice(0, 3).map(Math.floor); for (let n = -e; n <= e; n++) for (let l = -e; l <= e; l++) for (let d = -e; d <= e; d++) { let [u, y, f] = [s[0] + n, s[1] + l, s[2] + d]; if (o.gameWorld.chunkManager.getBlock(u, y, f) == 0) o.gameWorld.chunkManager.setBlock(u, y, f, this.options["Block ID"], true, true); } } } };
+    var ModNoHunger = class extends a { constructor() { super("NoHunger", "Misc", null); } onEnable() { p.listeners.NoHunger = function (e, t) { if (e == p.toServer.TIME_STEP_INFO) { if (t.m) delete t.m; if (t.s) delete t.s; if (t.j) delete t.j; } }; } onDisable() { delete p.listeners.NoHunger; } };
+    var ModNoDrown = class extends a { constructor() { super("NoDrown", "Misc", null); } get damageListener() { return o.gameWorld.eventEmitter._events.get(48).values().next().value; } onRender() { if (o?.gameWorld?.eventEmitter?._events && this.damageListener.callback.toString().includes("damageToApply")) this.damageListener.callback = () => { }; } onDisable() { if (o?.gameWorld?.eventEmitter?._events) this.damageListener.callback = e => { this.damageToApply += e; }; } };
+    var ModInstantRespawn = class extends a { constructor() { super("InstantRespawn", "Misc"); } get gamemode() { return location.pathname.replace("/match/", ""); } onRender() { if (o.gameWorld?.player.isAlive) return; let e = false; switch (this.gamemode) { case "one-block": o.gameWorld.server.sendData(p.toServer.ONE_BLOCK_REQUEST_RESPAWN, true); e = true; break; case "parkour": o.gameWorld.server.sendData(p.toServer.PARKOUR_REQUEST_RESPAWN, true); e = true; break; case "bedwars": o.gameWorld.server.sendData(p.toServer.BED_WARS_REQUEST_RESPAWN, true); e = true; break; case "survival": o.gameWorld.server.sendData(p.toServer.SANDBOX_REQUEST_RESPAWN, true); e = true; break; } if (e) o.stores.get("gameState").setLayoutState(0); } };
+    var ModShopAnywhere = class extends a { constructor() { super("ShopAnywhere", "Misc"); } get npcSystem() { return o?.gameWorld?.systemsManager?.activeSystems.find(e => e?.isPlayerInShoppingZone); } onRender() { if (this?.npcSystem) { this._og = this._og || this.npcSystem.isPlayerInShoppingZone; if (this.npcSystem.isPlayerInShoppingZone == this._og) this.npcSystem.isPlayerInShoppingZone = () => true; } } onDisable() { if (this.npcSystem) this.npcSystem.isPlayerInShoppingZone = this._og; } };
+    var ModSelfHarm = class extends a { constructor() { super("SelfHarm", "Misc", { Amount: 1 }); } onEnable() { o.gameWorld.server.msgsToSend.push(p.toServer.GOT_DAMAGE, parseFloat(this.options.Amount)); this.disable(); } };
+    var ModBlockFinder = class extends a { constructor() { super("BlockFinder", "Misc", { "Search Radius": 16, "Block ID": 581 }); this.CHUNK_SIZE = 16; this.CHUNK_CHECK_MS = 200; this.foundBlocks = []; this.lastChunkKey = ""; this.chunkInterval = null; this.raf = null; this.ui = null; this.listEl = null; } getPlayerChunk() { let e = o.gameWorld.player.position; return [Math.floor(e.x / this.CHUNK_SIZE), Math.floor(e.y / this.CHUNK_SIZE), Math.floor(e.z / this.CHUNK_SIZE)]; } createUI() { if (this.ui) return; let e = document.createElement("div"); e.style.cssText = `position:fixed; top:80px; left:80px; width:260px; background:#111; color:#ddd; font:11px system-ui, sans-serif; border-radius:6px; box-shadow:0 6px 20px rgba(0,0,0,.4); z-index:99999; user-select:none;`; e.innerHTML = `<div class="bf-head" style="padding:6px 8px; cursor:move; opacity:.85;">Block Finder</div><div class="bf-list" style="max-height:260px; overflow:auto; padding:4px 8px 8px; font-family:monospace; white-space:pre;"></div>`; document.body.appendChild(e); this.ui = e; this.listEl = e.querySelector(".bf-list"); let t = false, i = 0, s = 0, n = e.querySelector(".bf-head"); n.onmousedown = l => { t = true; i = l.clientX - e.offsetLeft; s = l.clientY - e.offsetTop; }; document.addEventListener("mousemove", this._dragMove = l => { if (t) { e.style.left = l.clientX - i + "px"; e.style.top = l.clientY - s + "px"; } }); document.addEventListener("mouseup", this._dragUp = () => t = false); } destroyUI() { if (this.ui) { this.ui.remove(); this.ui = null; this.listEl = null; document.removeEventListener("mousemove", this._dragMove); document.removeEventListener("mouseup", this._dragUp); } } scanChunks() { let e = this.options["Search Radius"] | 0; let t = this.options["Block ID"] | 0; let i = o.gameWorld.chunkManager; let s = this.getPlayerChunk(); this.foundBlocks = []; for (let n = -e; n <= e; n++) for (let l = -e; l <= e; l++) for (let d = -e; d <= e; d++) { let u = s[0] + n, y = s[1] + l, f = s[2] + d; let g = i.getChunkArray(u, y, f); if (g) for (let b = 0; b < g.length; b++) { if (g[b] !== t) continue; let ie = (u << 4) + (b & 15); let re = (y << 4) + ((b >> 4) & 15); let ne = (f << 4) + (b >> 8); if (o.gameWorld.chunkManager.getBlock(ie, re, ne) === t) this.foundBlocks.push([ie, re, ne]); } } } renderDistances = () => { if (!this.listEl) return; let e = [...o.gameWorld.player.position]; if (this.foundBlocks.length === 0) this.listEl.textContent = "none nearby"; else this.listEl.textContent = this.foundBlocks.map(t => ({ pos: t, d: x.calculateDistanceArr(e, t) })).sort((t, i) => t.d - i.d).map(t => `${t.pos[0]}, ${t.pos[1]}, ${t.pos[2]}  ${t.d.toFixed(1)}m`).join("\n"); this.raf = requestAnimationFrame(this.renderDistances); }; onEnable() { this.createUI(); this.scanChunks(); this.renderDistances(); this.chunkInterval = setInterval(() => { let e = this.getPlayerChunk().join(","); if (e !== this.lastChunkKey) { this.lastChunkKey = e; this.scanChunks(); } }, this.CHUNK_CHECK_MS); } onDisable() { clearInterval(this.chunkInterval); cancelAnimationFrame(this.raf); this.chunkInterval = null; this.raf = null; this.foundBlocks = []; this.lastChunkKey = ""; this.destroyUI(); } };
+    var ModAirPlace = class extends a { constructor() { super("AirPlace", "Misc"); } get blockPlaceSystem() { return o.gameWorld.systemsManager.activeSystems.find(e => e?._handlePlaceInAir); } onRender() { if (this.blockPlaceSystem) this.blockPlaceSystem.canPlaceBlocksInAir = true; } onDisable() { if (this.blockPlaceSystem && (!h.modules.Scaffold || !h.modules.Scaffold.isEnabled)) { this.blockPlaceSystem.canPlaceBlocksInAir = o.gameWorld.player.gameMode == 2; } } };
+ 
+    // ================== MENUS MODULES ==================
+    var ModCrafting = class extends a { constructor() { super("Crafting", "Menus"); } onEnable() { m.openOtherItem(2); this.disable(); if (h.modules.ClickGUI) h.modules.ClickGUI.onDisable(false); } };
+    var ModDyeingTable = class extends a { constructor() { super("DyeingTable", "Menus"); } onEnable() { m.openOtherItem(9); this.disable(); if (h.modules.ClickGUI) h.modules.ClickGUI.onDisable(false); } };
+    var ModCuttingTable = class extends a { constructor() { super("CuttingTable", "Menus"); } onEnable() { m.openOtherItem(10); this.disable(); if (h.modules.ClickGUI) h.modules.ClickGUI.onDisable(false); } };
+ 
+    // 🌐 WORLD MODULES
+    var ModFastBreak = class extends a {
+        constructor() {
+            super("FastBreak", "World", {
+                "Delay (1-5)": 1,
+                "Speed (1-100%)": 100
+            });
+            this._originalDurability = new Map();
+            this._lastBreakTime = 0;
+        }
+        
+        onEnable() {
+            Object.values(o.gameWorld.items).forEach(item => {
+                if (item?.destruction?.durability !== undefined) {
+                    this._originalDurability.set(item, item.destruction.durability);
+                }
+            });
+            this.applyModifiers();
+        }
+        
+        applyModifiers() {
+            const speed = parseFloat(this.options["Speed (1-100%)"]) || 100;
+            const speedFactor = 1 - (speed / 100 * 0.999);
+            
+            Object.values(o.gameWorld.items).forEach(item => {
+                if (!item?.destruction?.durability) return;
+                const original = this._originalDurability.get(item) ?? item.destruction.durability;
+                const name = (item.name || "").toLowerCase();
+                const isObsidian = name.includes("obsidian") || name.includes("hắc diện") || name.includes("bedrock");
+                const factor = isObsidian ? speedFactor * 0.5 : speedFactor;
+                item.destruction.durability = Math.max(0, original * factor);
+            });
+        }
+        
+        onRender() {
+            const delay = parseInt(this.options["Delay (1-5)"]) || 1;
+            const minDelay = delay * 50;
+            const now = Date.now();
+            this.applyModifiers();
+            if (o.gameWorld?.player?.inputs?.leftMB && now - this._lastBreakTime >= minDelay) {
+                this._lastBreakTime = now;
+            }
+        }
+        
+        onSettingUpdate() {
+            if (this.isEnabled) this.applyModifiers();
+        }
+        
+        onDisable() {
+            this._originalDurability.forEach((original, item) => {
+                if (item?.destruction) item.destruction.durability = original;
+            });
+            this._originalDurability.clear();
+        }
+    };
+ 
+    // ------------------------------ Module Manager ------------------------------
+    var h = {
+        modules: {},
+        addModules(...classes) { for (let cls of classes) { let mod = new cls(); this.modules[mod.name] = mod; } },
+        addModule(mod) { this.modules[mod.name] = mod; },
+        handleKeyPress(code) { for (let name in this.modules) { let mod = this.modules[name]; if (mod.waitingForBind) { mod.keybind = code === "Escape" ? null : code; mod.waitingForBind = false; } else if (mod.keybind === code) { mod.toggle(); } } },
+        init() {
+            this.addModules(
+                // Visual
+                ModArraylist, ModWatermark, ModClickGUI, ModNoFog, ModBetterScreen, ModChams,
+                ModFreecam, ModXray, ModInterface, ModBlockOutline, ModTracers,
+                // Movement
+                ModAirjump, ModNoFall, ModVelocity, ModFly, ModSpeed, ModNoClip, ModTimer, ModHighJump, ModGroundSpeed, ModSpider, ModScaffold, ModAutoSprint, ModStep,
+                // Combat
+                ModKillaura, ModGunModifier, ModAimbot,
+                // Misc
+                ModInstabreak, ModNuker, ModAdBypass, ModFreeHeadcoins, ModFill, ModNoHunger, ModNoDrown, ModInstantRespawn, ModShopAnywhere, ModSelfHarm, ModBlockFinder, ModAirPlace,
+                // Fun
+                ModWeatherScreen, ModKeystrokes, ModHitParticles,
+                // Menus
+                ModCrafting, ModDyeingTable, ModCuttingTable,
+                // World
+                ModFastBreak
+            );
+            c.on("render", () => { for (let name in this.modules) { let mod = this.modules[name]; if (mod.isEnabled && mod.onRender) mod.onRender(); } });
+            c.on("keydown", this.handleKeyPress.bind(this));
+            c.on("setting.update", () => { for (let name in this.modules) { let mod = this.modules[name]; if (mod.isEnabled && mod.onSettingUpdate) mod.onSettingUpdate(); } });
+            if(this.modules.Arraylist) this.modules.Arraylist.enable();
+            if(this.modules.Watermark) this.modules.Watermark.enable();
+            if(this.modules.Interface) this.modules.Interface.enable();
+        }
+    };
+ 
+    // ------------------------------ Main Class ------------------------------
+    var se = class {
+        constructor() { this.version = "1.0.49"; this.init(); }
+        init() {
+            setInterval(() => { c.emit("render"); }, 1000 / 60);
+            window.addEventListener("keydown", e => { c.emit("keydown", e.code); }, {capture:true});
+            h.init(); p.init(); this.packets = p; this.moduleManager = h; this.hooks = o;
+        }
+        disable() { }
+    };
+ 
+    function le() { window.liqclient = new se(); }
+    if (document.readyState === "complete" || document.readyState === "interactive") le();
+    else document.addEventListener("DOMContentLoaded", () => { setTimeout(le, 1000); });
+})();
